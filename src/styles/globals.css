@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── MAPSA Theme Variables ────────────────────────────────────── */
+
+:root {
+  /* Dark mode (default) */
+  --mapsa-bg: #18140f;
+  --mapsa-panel: #1f1a14;
+  --mapsa-panel-alt: #252018;
+  --mapsa-border: #3a332c;
+  --mapsa-gold: #c8a96e;
+  --mapsa-gold-light: #e8d49a;
+  --mapsa-muted: #b8ac98;
+  --mapsa-text: #ede5d4;
+  --mapsa-accent: #d4a84b;
+  --mapsa-red: #8a0000;
+  --mapsa-input-bg: #2a2419;
+  --mapsa-hover: #302a1f;
+  --mapsa-hotspot-bg: rgba(200, 169, 110, 0.12);
+  --mapsa-hotspot-border: rgba(200, 169, 110, 0.5);
+  --mapsa-hotspot-active: rgba(212, 168, 75, 0.85);
+  --mapsa-badge-bg: rgba(200, 169, 110, 0.15);
+}
+
+.light {
+  --mapsa-bg: #f4efe6;
+  --mapsa-panel: #eae3d6;
+  --mapsa-panel-alt: #e0d8c8;
+  --mapsa-border: #c4b898;
+  --mapsa-gold: #7a5010;
+  --mapsa-gold-light: #a07020;
+  --mapsa-muted: #6b5d48;
+  --mapsa-text: #1c1508;
+  --mapsa-accent: #8a6010;
+  --mapsa-red: #8a0000;
+  --mapsa-input-bg: #fff9f0;
+  --mapsa-hover: #ddd5c4;
+  --mapsa-hotspot-bg: rgba(122, 80, 16, 0.1);
+  --mapsa-hotspot-border: rgba(122, 80, 16, 0.45);
+  --mapsa-hotspot-active: rgba(138, 96, 16, 0.8);
+  --mapsa-badge-bg: rgba(122, 80, 16, 0.12);
+}
+
+/* ─── Base Resets ──────────────────────────────────────────────── */
+
+html {
+  font-size: 140%;  /* Global scale — all rem-based sizes are 40% larger */
+}
+
+body {
+  background-color: var(--mapsa-bg);
+  color: var(--mapsa-text);
+  font-family: "EB Garamond", Georgia, serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mapsa-border) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--mapsa-border);
+  border-radius: 3px;
+}
+
+/* ─── MAPSA Utility Classes ───────────────────────────────────── */
+
+@layer components {
+  .mapsa-label {
+    @apply font-cinzel text-2xs tracking-widest uppercase text-mapsa-muted;
+  }
+
+  .mapsa-mono {
+    @apply font-mono text-xs text-mapsa-gold-light;
+  }
+
+  .mapsa-section-title {
+    @apply font-cinzel text-sm tracking-widest uppercase text-mapsa-gold mb-3;
+  }
+
+  .mapsa-badge {
+    @apply font-cinzel text-2xs tracking-widest uppercase
+      px-2 py-0.5 rounded-sm
+      border border-mapsa-border;
+    background: var(--mapsa-badge-bg);
+    color: var(--mapsa-gold);
+  }
+
+  .mapsa-badge-red {
+    background: rgba(138, 0, 0, 0.18);
+    color: #d44;
+    border-color: rgba(138, 0, 0, 0.3);
+  }
+
+  .mapsa-btn {
+    @apply font-cinzel text-2xs tracking-wider
+      px-3 py-1.5 rounded
+      border border-mapsa-border
+      bg-mapsa-panel-alt text-mapsa-gold
+      cursor-pointer transition-all duration-200;
+  }
+
+  .mapsa-btn:hover {
+    @apply border-mapsa-gold;
+  }
+
+  .mapsa-btn-active {
+    background: var(--mapsa-accent);
+    color: #18140f;
+    border-color: var(--mapsa-accent);
+  }
+
+  .mapsa-btn-gold {
+    @apply font-cinzel text-2xs tracking-widest uppercase
+      px-3.5 py-1.5 rounded
+      border border-mapsa-gold
+      bg-transparent text-mapsa-gold
+      cursor-pointer transition-all duration-200;
+  }
+
+  .mapsa-btn-gold:hover {
+    background: var(--mapsa-gold);
+    color: #18140f;
+  }
+
+  .mapsa-input {
+    @apply w-full rounded border border-mapsa-border
+      px-2.5 py-1.5
+      font-garamond text-sm text-mapsa-text
+      outline-none transition-colors duration-200;
+    background: var(--mapsa-input-bg);
+  }
+
+  .mapsa-input:focus {
+    border-color: var(--mapsa-gold);
+  }
+
+  .mapsa-card {
+    @apply rounded-md border border-mapsa-border p-3.5 cursor-pointer
+      transition-all duration-200;
+    background: var(--mapsa-panel-alt);
+  }
+
+  .mapsa-card:hover {
+    border-color: var(--mapsa-gold);
+  }
+
+  .mapsa-tab {
+    @apply font-cinzel text-2xs tracking-wider uppercase
+      px-3.5 py-2 cursor-pointer
+      text-mapsa-muted bg-transparent
+      border-b-2 border-transparent
+      transition-all duration-200;
+  }
+
+  .mapsa-tab-active {
+    color: var(--mapsa-gold);
+    border-bottom-color: var(--mapsa-gold);
+  }
+
+  .mapsa-disclaimer {
+    @apply font-garamond text-xs text-mapsa-muted italic
+      leading-relaxed pl-3 my-4;
+    border-left: 2px solid var(--mapsa-border);
+  }
+}
+
+/* ─── Hotspot Glow Animation ──────────────────────────────────── */
+
+@keyframes hotspot-pulse {
+  0%, 100% { box-shadow: 0 0 8px var(--mapsa-hotspot-border); }
+  50% { box-shadow: 0 0 16px var(--mapsa-hotspot-active); }
+}
+
+.hotspot-active {
+  animation: hotspot-pulse 2s ease-in-out infinite;
+}

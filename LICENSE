@@ -1,0 +1,99 @@
+MAPSA Monte Albán Inscription Registry
+Copyright (c) 2026 Monte Albán Heritage Center (MAHC) and contributors
+
+This project is dual-licensed to distinguish between software and content:
+
+
+================================================================================
+SOFTWARE LICENSE — MIT
+================================================================================
+
+The software components of this project (all files in src/components/,
+src/app/, src/lib/, src/styles/, configuration files, and build tooling)
+are licensed under the MIT License:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+
+================================================================================
+CONTENT, DATA, AND DOCUMENTATION LICENSE — CC BY-NC-SA 4.0
+================================================================================
+
+The non-code content of this project (seed data in src/data/, inscription
+records, photographs, illustrations, archaeological interpretations,
+citation metadata, contributor profiles, and all documentation including
+README files) is licensed under the Creative Commons Attribution-NonCommercial-
+ShareAlike 4.0 International License.
+
+You are free to:
+- SHARE: copy and redistribute the material in any medium or format
+- ADAPT: remix, transform, and build upon the material
+
+Under the following terms:
+- ATTRIBUTION: you must give appropriate credit to "Monte Albán Heritage
+  Center (MAHC) — MAPSA Registry", provide a link to this repository, and
+  indicate if changes were made.
+- NON-COMMERCIAL: you may not use the material for commercial purposes.
+- SHARE-ALIKE: if you remix, transform, or build upon the material, you
+  must distribute your contributions under the same license as the original.
+
+No additional restrictions: you may not apply legal terms or technological
+measures that legally restrict others from doing anything the license permits.
+
+Full license text: https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+
+================================================================================
+ACADEMIC CITATION
+================================================================================
+
+When citing this project in academic work, please use:
+
+  Monte Albán Heritage Center (MAHC). MAPSA: Monte Albán Primary Source
+  Archive — Inscription Registry. Oaxaca, Mexico, 2026.
+  https://registry.montealbanoaxaca.com
+
+Individual records, interpretations, and photographs should be cited
+according to the attribution and source metadata provided within each
+record. Contributing scholars retain authorship credit for their
+interpretive contributions.
+
+
+================================================================================
+THIRD-PARTY DEPENDENCIES
+================================================================================
+
+This project depends on third-party software (Next.js, React, Tailwind CSS,
+and others listed in package.json). Each dependency is licensed under its
+own terms, available in the respective package source. The licensing of
+this project does not override or modify those upstream licenses.
+
+
+================================================================================
+CONTACT
+================================================================================
+
+For licensing questions, commercial inquiries (which may require separate
+arrangement), or research partnerships:
+
+Monte Albán Heritage Center
+contact@montealbanoaxaca.com
+https://montealbanoaxaca.com
+
+For institutional access to MAPSA's full archive, contact MAHC directly.

@@ -96,10 +96,10 @@ export default function ImageViewer({
       </div>
 
       {/* Caption */}
-      <p className="text-[11px] text-mapsa-muted mt-1">
+      <p className="text-[0.69rem] text-mapsa-muted mt-1">
         {activeImgData.caption}
       </p>
-      <p className="text-[10px] text-mapsa-muted">
+      <p className="text-[0.625rem] text-mapsa-muted">
         {activeImgData.photographer} · {activeImgData.date}
         {!activeImgData.isPrimaryEvidence && " · Interpretive aid"}
       </p>

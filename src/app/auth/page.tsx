@@ -95,12 +95,12 @@ export default function AuthPage() {
       <header className="flex items-center px-4 h-[52px] bg-mapsa-panel border-b border-mapsa-border">
         <Link
           href="/"
-          className="font-cinzel text-[13px] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors"
+          className="font-cinzel text-[0.81rem] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors"
         >
           MAHC · MAPSA
         </Link>
         <span className="text-mapsa-border mx-2.5">|</span>
-        <span className="font-cinzel text-[11px] text-mapsa-muted tracking-wider">
+        <span className="font-cinzel text-[0.69rem] text-mapsa-muted tracking-wider">
           Monte Albán Inscription Registry
         </span>
       </header>
@@ -227,7 +227,7 @@ export default function AuthPage() {
                     className="mapsa-input"
                     placeholder="you@university.edu"
                   />
-                  <p className="text-[10px] text-mapsa-muted mt-1 font-garamond italic">
+                  <p className="text-[0.625rem] text-mapsa-muted mt-1 font-garamond italic">
                     Recognized academic domains are auto-approved. Others require
                     admin review.
                   </p>

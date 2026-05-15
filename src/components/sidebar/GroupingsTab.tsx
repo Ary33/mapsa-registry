@@ -45,7 +45,7 @@ export default function GroupingsTab({
                 Elements: {g.elementIds.join(" + ")} ·{" "}
                 {g.proposedRelationship}
               </div>
-              <p className="text-[13px] leading-relaxed mb-1.5">
+              <p className="text-[0.81rem] leading-relaxed mb-1.5">
                 {g.interpretation}
               </p>
               {g.interpretationCaution && (
@@ -54,7 +54,7 @@ export default function GroupingsTab({
                 </p>
               )}
               <div className="flex justify-between items-center mt-2">
-                <span className="text-[11px] text-mapsa-muted">
+                <span className="text-[0.69rem] text-mapsa-muted">
                   {g.contributorName} · {g.status} · v{g.version}
                 </span>
                 <button
@@ -68,7 +68,7 @@ export default function GroupingsTab({
                 </button>
               </div>
               {g.sourceIds.length > 0 && (
-                <p className="text-[11px] text-mapsa-muted mt-1.5">
+                <p className="text-[0.69rem] text-mapsa-muted mt-1.5">
                   Sources:{" "}
                   {g.sourceIds
                     .map(

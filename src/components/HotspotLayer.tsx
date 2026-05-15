@@ -61,7 +61,7 @@ export default function HotspotLayer({
             }}
           >
             <span
-              className="absolute -top-[18px] left-0.5 font-mono text-[10px] tracking-wider font-semibold"
+              className="absolute -top-[18px] left-0.5 font-mono text-[0.625rem] tracking-wider font-semibold"
               style={{ color: isActive ? color : `${color}99` }}
             >
               {el.label}

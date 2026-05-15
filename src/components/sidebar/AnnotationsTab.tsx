@@ -76,7 +76,7 @@ export default function AnnotationsTab({
       {/* Form */}
       {showForm && (
         <div className="bg-mapsa-panel-alt border border-mapsa-border rounded-md p-4 mb-4">
-          <h4 className="mapsa-section-title text-[11px] !mb-2">
+          <h4 className="mapsa-section-title text-[0.69rem] !mb-2">
             New Annotation
           </h4>
           <div className="grid grid-cols-2 gap-2.5 mb-2.5">
@@ -215,7 +215,7 @@ export default function AnnotationsTab({
               </span>
               <span className="mapsa-badge text-2xs">{a.type}</span>
             </div>
-            <p className="text-[11px] text-mapsa-muted mb-1.5">
+            <p className="text-[0.69rem] text-mapsa-muted mb-1.5">
               {a.affiliation && `${a.affiliation} · `}
               {a.orcid && `ORCID: ${a.orcid} · `}
               {CONFIDENCE_ICON[a.confidence]} {a.confidence} ·{" "}
@@ -223,7 +223,7 @@ export default function AnnotationsTab({
             </p>
             <p className="text-sm leading-relaxed mb-2">{a.body}</p>
             {a.sourcesCited.length > 0 && (
-              <p className="text-[11px] text-mapsa-muted">
+              <p className="text-[0.69rem] text-mapsa-muted">
                 Sources cited: {a.sourcesCited.join(", ")}
               </p>
             )}

@@ -102,7 +102,7 @@ export default function PhotoRequestTab({
         />
       </div>
 
-      <label className="flex items-center gap-2 mb-3.5 text-[13px] text-mapsa-muted cursor-pointer">
+      <label className="flex items-center gap-2 mb-3.5 text-[0.81rem] text-mapsa-muted cursor-pointer">
         <input
           type="checkbox"
           checked={form.permissionToCredit}

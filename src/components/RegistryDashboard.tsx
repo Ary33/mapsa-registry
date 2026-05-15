@@ -31,13 +31,13 @@ export default function RegistryDashboard({
     <div className="max-w-[900px] mx-auto px-6 py-8">
       {/* Hero */}
       <div className="text-center mb-8">
-        <h1 className="font-cinzel text-[28px] text-mapsa-gold tracking-[4px] mb-2">
+        <h1 className="font-cinzel text-3xl text-mapsa-gold tracking-[4px] mb-2">
           MAPSA
         </h1>
         <p className="font-cinzel text-sm text-mapsa-muted tracking-[2px] mb-4">
           Monte Albán Inscription Registry
         </p>
-        <p className="text-[15px] leading-relaxed text-mapsa-muted max-w-[650px] mx-auto mb-6">
+        <p className="text-base leading-relaxed text-mapsa-muted max-w-[650px] mx-auto mb-6">
           MAPSA Monte Albán Inscription Registry is a living visual corpus
           for documenting, comparing, citing, and discussing carved
           inscription clusters from Monte Albán. The registry preserves
@@ -54,7 +54,7 @@ export default function RegistryDashboard({
 
       {/* Search */}
       <input
-        className="mapsa-input mb-5 text-[15px]"
+        className="mapsa-input mb-5 text-base"
         placeholder="Search by ID, structure, element, source, contributor, status…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}

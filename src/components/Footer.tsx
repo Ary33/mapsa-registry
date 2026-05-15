@@ -4,7 +4,7 @@ export default function Footer() {
       MAPSA does not present automated decipherments. All interpretations
       are attributed, versioned, and subject to revision.
       <br />
-      <span className="text-[10px] tracking-wider not-italic">
+      <span className="text-[0.625rem] tracking-wider not-italic">
         © {new Date().getFullYear()} Monte Albán Heritage Center · MAPSA
       </span>
     </footer>

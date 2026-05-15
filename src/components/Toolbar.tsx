@@ -24,13 +24,13 @@ export default function Toolbar({
       <div className="flex items-center gap-2.5 shrink-0">
         <Link
           href="/"
-          className="font-cinzel text-[13px] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors"
+          className="font-cinzel text-[0.81rem] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors"
         >
           MAHC · MAPSA
         </Link>
         <span className="text-mapsa-border">|</span>
         {recordId ? (
-          <span className="font-cinzel text-[11px] text-mapsa-muted tracking-wider">
+          <span className="font-cinzel text-[0.69rem] text-mapsa-muted tracking-wider">
             <Link href="/" className="hover:text-mapsa-gold transition-colors">
               Registry
             </Link>
@@ -40,7 +40,7 @@ export default function Toolbar({
             </span>
           </span>
         ) : (
-          <span className="font-cinzel text-[11px] text-mapsa-muted tracking-wider">
+          <span className="font-cinzel text-[0.69rem] text-mapsa-muted tracking-wider">
             Monte Albán Inscription Registry
           </span>
         )}
@@ -68,7 +68,7 @@ export default function Toolbar({
             {profile ? (
               <div className="flex items-center gap-2">
                 {profile.role === "admin" && (
-                  <span className="mapsa-badge text-[9px]">Admin</span>
+                  <span className="mapsa-badge text-[0.56rem]">Admin</span>
                 )}
                 <span className="font-garamond text-xs text-mapsa-muted hidden sm:inline">
                   {profile.full_name || profile.email}

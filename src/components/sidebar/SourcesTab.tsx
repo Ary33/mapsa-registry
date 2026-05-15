@@ -23,12 +23,12 @@ export default function SourcesTab({ sources }: SourcesTabProps) {
               {src.pages ? `, ${src.pages}` : ""}
             </p>
             {src.doi && (
-              <p className="text-[11px] text-mapsa-gold mt-1">
+              <p className="text-[0.69rem] text-mapsa-gold mt-1">
                 DOI: {src.doi}
               </p>
             )}
             {src.url && (
-              <p className="text-[11px] text-mapsa-gold mt-0.5">
+              <p className="text-[0.69rem] text-mapsa-gold mt-0.5">
                 {src.url}
               </p>
             )}

@@ -11,7 +11,7 @@ export default function PendingPage() {
       <header className="flex items-center px-4 h-[52px] bg-mapsa-panel border-b border-mapsa-border">
         <Link
           href="/"
-          className="font-cinzel text-[13px] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors"
+          className="font-cinzel text-[0.81rem] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors"
         >
           MAHC · MAPSA
         </Link>

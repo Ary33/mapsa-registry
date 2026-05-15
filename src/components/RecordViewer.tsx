@@ -118,7 +118,7 @@ export default function RecordViewer({
             variant={st === "NEEDS EXPERT REVIEW" ? "red" : "default"}
           />
         ))}
-        <span className="mapsa-mono text-[11px] ml-auto">
+        <span className="mapsa-mono text-[0.69rem] ml-auto">
           v{record.recordVersion}
         </span>
       </div>

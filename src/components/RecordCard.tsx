@@ -31,13 +31,13 @@ export default function RecordCard({ record }: RecordCardProps) {
                 />
               ))}
             </div>
-            <p className="text-[15px] font-semibold mb-1">
+            <p className="text-[0.94rem] font-semibold mb-1">
               {record.title}
             </p>
-            <p className="text-[13px] text-mapsa-muted">
+            <p className="text-[0.81rem] text-mapsa-muted">
               {record.structure} · {record.area}
             </p>
-            <div className="flex gap-3 mt-2 text-[11px] text-mapsa-muted">
+            <div className="flex gap-3 mt-2 text-[0.69rem] text-mapsa-muted">
               <span>{record.images.length} images</span>
               <span>{record.elements.length} elements</span>
               <span>{record.groupings.length} groupings</span>

@@ -32,7 +32,7 @@ export default function ElementsTab({
                   {CONFIDENCE_ICON[el.confidence]} {el.confidence}
                 </span>
               </div>
-              <p className="text-[13px] leading-relaxed mb-1.5">
+              <p className="text-[0.81rem] leading-relaxed mb-1.5">
                 {el.neutralDescription}
               </p>
               <div className="mapsa-label text-2xs">

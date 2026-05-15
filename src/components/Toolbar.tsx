@@ -68,7 +68,12 @@ export default function Toolbar({
             {profile ? (
               <div className="flex items-center gap-2">
                 {profile.role === "admin" && (
-                  <span className="mapsa-badge text-[0.56rem]">Admin</span>
+                  <Link
+                    href="/admin"
+                    className="mapsa-badge text-[0.56rem] hover:border-mapsa-gold transition-colors"
+                  >
+                    Admin
+                  </Link>
                 )}
                 <span className="font-garamond text-xs text-mapsa-muted hidden sm:inline">
                   {profile.full_name || profile.email}

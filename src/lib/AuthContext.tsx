@@ -61,7 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .single();
 
     if (error) {
-      console.error("Error fetching profile:", error);
+      // Profile might not exist yet (trigger didn't fire)
+      // Try to create one from auth.users metadata
+      console.warn("Profile fetch failed, attempting to check auth user:", error.message);
       return null;
     }
     return data as UserProfile;

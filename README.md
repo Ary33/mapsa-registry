@@ -111,19 +111,6 @@ Replace the `PlaceholderImage` SVG component with actual `<img>` tags:
 - Tailwind CSS
 - Local JSON seed data (Supabase-ready)
 
-## License
-
-This project is dual-licensed:
-
-- **Software** (code, components, build tooling): [MIT](LICENSE)
-- **Content** (data, records, documentation, photographs): [CC BY-NC-SA 4.0](LICENSE)
-
-In short: the code is freely usable in any project. Content, including
-inscription records and archaeological interpretations, requires attribution
-to MAHC and may not be used commercially without arrangement.
-
-For institutional partnerships or commercial inquiries, contact:
-contact@montealbanoaxaca.com
 ---
 
 © Monte Albán Heritage Center · MAPSA

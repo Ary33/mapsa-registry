@@ -188,3 +188,53 @@ body {
 .hotspot-active {
   animation: hotspot-pulse 2s ease-in-out infinite;
 }
+
+/* ─── Glyph Sidebar Utilities ─────────────────────────────────── */
+
+.mapsa-section-label {
+  font-family: "Cinzel", serif;
+  font-size: 0.5rem;
+  letter-spacing: 0.38em;
+  text-transform: uppercase;
+  color: var(--mapsa-gold);
+  opacity: 0.7;
+  border-bottom: 1px solid var(--mapsa-border);
+  padding-bottom: 5px;
+  margin-bottom: 9px;
+}
+
+.mapsa-tag {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.56rem;
+  padding: 2px 7px;
+  border-radius: 2px;
+  border: 1px solid var(--mapsa-border);
+  color: var(--mapsa-muted);
+  background: rgba(255, 255, 255, 0.04);
+  display: inline-block;
+}
+
+.light .mapsa-tag {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.mapsa-tag-cal {
+  border-color: #6a9f8a;
+  color: #7dbfaa;
+}
+
+.mapsa-tag-anthro {
+  border-color: #8a6a9f;
+  color: #a88fc4;
+}
+
+.mapsa-tag-epi {
+  border-color: var(--mapsa-gold);
+  color: var(--mapsa-gold);
+  opacity: 0.8;
+}
+
+.mapsa-tag-struct {
+  border-color: #9f7a6a;
+  color: #c4a090;
+}

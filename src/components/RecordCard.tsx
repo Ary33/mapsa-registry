@@ -1,6 +1,5 @@
 import Link from "next/link";
 import type { InscriptionRecord } from "@/lib/types";
-import PlaceholderImage from "./PlaceholderImage";
 import StatusBadge from "./StatusBadge";
 
 interface RecordCardProps {
@@ -8,13 +7,34 @@ interface RecordCardProps {
 }
 
 export default function RecordCard({ record }: RecordCardProps) {
+  const hasImage = record.images[0]?.src && record.images[0].src.length > 0;
+
   return (
     <Link href={`/record/${record.id}`} className="block">
       <div className="mapsa-card">
         <div className="flex gap-4 items-start flex-wrap">
           {/* Thumbnail */}
           <div className="w-[120px] h-[90px] shrink-0 rounded overflow-hidden border border-mapsa-border">
-            <PlaceholderImage label={record.id} />
+            {hasImage ? (
+              <img
+                src={record.images[0].src}
+                alt={record.id}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <svg viewBox="0 0 120 90" className="w-full h-full">
+                <defs>
+                  <linearGradient id={`sg-${record.id}`} x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#3a332c" />
+                    <stop offset="100%" stopColor="#1f1a14" />
+                  </linearGradient>
+                </defs>
+                <rect width="120" height="90" fill={`url(#sg-${record.id})`} />
+                <text x="60" y="50" textAnchor="middle" fill="#b8ac98" fontFamily="monospace" fontSize="8" opacity="0.5">
+                  {record.id}
+                </text>
+              </svg>
+            )}
           </div>
 
           {/* Info */}

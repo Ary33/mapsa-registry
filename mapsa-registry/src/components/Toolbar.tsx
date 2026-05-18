@@ -1,0 +1,96 @@
+"use client";
+
+import Link from "next/link";
+import { useTheme } from "@/lib/ThemeContext";
+import { useAuth } from "@/lib/AuthContext";
+
+interface ToolbarProps {
+  recordId?: string;
+  recordVersion?: string;
+}
+
+export default function Toolbar({
+  recordId,
+  recordVersion,
+}: ToolbarProps) {
+  const { theme, toggleTheme } = useTheme();
+  const { profile, isLoading, signOut } = useAuth();
+
+  return (
+    <header className="sticky top-0 z-50 flex items-center justify-between px-4 py-2 min-h-[52px] bg-mapsa-panel border-b border-mapsa-border flex-wrap gap-x-3 gap-y-2">
+      {/* Left */}
+      <div className="flex items-center gap-2.5 shrink-0 min-w-0">
+        <Link
+          href="/"
+          className="font-cinzel text-[0.81rem] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors whitespace-nowrap"
+        >
+          MAHC · MAPSA
+        </Link>
+        <span className="text-mapsa-border">|</span>
+        {recordId ? (
+          <span className="font-cinzel text-[0.69rem] text-mapsa-muted tracking-wider">
+            <Link href="/" className="hover:text-mapsa-gold transition-colors">
+              Registry
+            </Link>
+            <span className="text-mapsa-border"> / </span>
+            <span className="font-mono text-xs text-mapsa-gold-light">
+              {recordId}
+            </span>
+          </span>
+        ) : (
+          <span className="font-cinzel text-[0.69rem] text-mapsa-muted tracking-wider">
+            Monte Albán Inscription Registry
+          </span>
+        )}
+      </div>
+
+      {/* Right */}
+      <div className="flex items-center gap-2 shrink-0">
+        {recordVersion && (
+          <span className="font-mono text-2xs text-mapsa-muted">
+            v{recordVersion}
+          </span>
+        )}
+
+        {/* Auth section */}
+        {!isLoading && (
+          <>
+            {profile ? (
+              <div className="flex items-center gap-2">
+                {profile.role === "admin" && (
+                  <Link
+                    href="/admin"
+                    className="mapsa-badge text-[0.56rem] hover:border-mapsa-gold transition-colors"
+                  >
+                    Admin
+                  </Link>
+                )}
+                <span className="font-garamond text-xs text-mapsa-muted hidden sm:inline">
+                  {profile.full_name || profile.email}
+                </span>
+                <button
+                  onClick={signOut}
+                  className="mapsa-btn text-2xs"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <Link href="/auth" className="mapsa-btn-gold text-2xs">
+                Sign In
+              </Link>
+            )}
+          </>
+        )}
+
+        <button
+          onClick={toggleTheme}
+          className="mapsa-btn text-base leading-none"
+          title="Toggle theme"
+        >
+          {theme === "dark" ? "☀" : "☾"}
+        </button>
+      </div>
+    </header>
+  );
+}

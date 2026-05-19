@@ -17,12 +17,12 @@ export default function Toolbar({
   const { profile, isLoading, signOut } = useAuth();
 
   return (
-    <header className="sticky top-0 z-50 flex items-center justify-between px-4 h-[52px] bg-mapsa-panel border-b border-mapsa-border flex-wrap gap-1">
+    <header className="sticky top-0 z-50 flex items-center justify-between px-4 py-2 min-h-[52px] bg-mapsa-panel border-b border-mapsa-border flex-wrap gap-x-3 gap-y-2">
       {/* Left */}
-      <div className="flex items-center gap-2.5 shrink-0">
+      <div className="flex items-center gap-2.5 shrink-0 min-w-0">
         <Link
           href="/"
-          className="font-cinzel text-[0.81rem] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors"
+          className="font-cinzel text-[0.81rem] text-mapsa-gold tracking-[2px] uppercase hover:text-mapsa-accent transition-colors whitespace-nowrap"
         >
           MAHC · MAPSA
         </Link>

@@ -184,7 +184,7 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
   return (
     <div>
       {/* Status badges */}
-      <div className="flex gap-1.5 flex-wrap px-4 py-2 items-center">
+      <div className="flex gap-2 flex-wrap px-4 py-3 items-center border-b border-mapsa-border/40">
         {record.status.map((st) => (
           <StatusBadge
             key={st}
@@ -202,7 +202,7 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
         {/* ── LEFT: Image + overlays ── */}
         <div className="flex-1 min-w-[320px] flex flex-col border-r border-mapsa-border overflow-hidden">
           {/* Image tabs */}
-          <div className="flex gap-0.5 flex-wrap px-4 pt-3 pb-1 shrink-0">
+          <div className="flex gap-1 flex-wrap px-4 pt-3 pb-2 shrink-0">
             {record.images.map((img) => (
               <button
                 key={img.id}

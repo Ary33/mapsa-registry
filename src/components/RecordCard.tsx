@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { InscriptionRecord } from "@/lib/types";
+import { photoUrl } from "@/lib/data";
 import StatusBadge from "./StatusBadge";
 
 interface RecordCardProps {
@@ -7,7 +8,10 @@ interface RecordCardProps {
 }
 
 export default function RecordCard({ record }: RecordCardProps) {
-  const hasImage = record.images[0]?.src && record.images[0].src.length > 0;
+  // Use background_path for thumbnail if available
+  const thumbUrl = record.background_path
+    ? photoUrl(record.background_path)
+    : null;
 
   return (
     <Link href={`/record/${record.id}`} className="block">
@@ -15,9 +19,9 @@ export default function RecordCard({ record }: RecordCardProps) {
         <div className="flex gap-4 items-start flex-wrap">
           {/* Thumbnail */}
           <div className="w-[120px] h-[90px] shrink-0 rounded overflow-hidden border border-mapsa-border">
-            {hasImage ? (
+            {thumbUrl ? (
               <img
-                src={record.images[0].src}
+                src={thumbUrl}
                 alt={record.id}
                 className="w-full h-full object-cover"
               />
@@ -41,7 +45,7 @@ export default function RecordCard({ record }: RecordCardProps) {
           <div className="flex-1 min-w-[200px]">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="mapsa-mono">{record.id}</span>
-              {record.status.map((st) => (
+              {record.status?.map((st: string) => (
                 <StatusBadge
                   key={st}
                   text={st}
@@ -57,12 +61,6 @@ export default function RecordCard({ record }: RecordCardProps) {
             <p className="text-[0.81rem] text-mapsa-muted">
               {record.structure} · {record.area}
             </p>
-            <div className="flex gap-3 mt-2 text-[0.69rem] text-mapsa-muted">
-              <span>{record.images.length} images</span>
-              <span>{record.elements.length} elements</span>
-              <span>{record.groupings.length} groupings</span>
-              <span>{record.annotations.length} annotations</span>
-            </div>
           </div>
 
           {/* CTA */}

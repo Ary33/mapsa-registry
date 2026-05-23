@@ -42,35 +42,35 @@ export default function GroupingsTab({
                 </span>
               </div>
               <div className="mapsa-label mb-1.5">
-                Elements: {g.elementIds.join(" + ")} ·{" "}
-                {g.proposedRelationship}
+                Elements: {g.element_ids?.join(" + ")} ·{" "}
+                {g.proposed_relationship}
               </div>
               <p className="text-[0.81rem] leading-relaxed mb-1.5">
                 {g.interpretation}
               </p>
-              {g.interpretationCaution && (
+              {g.interpretation_caution && (
                 <p className="text-xs text-mapsa-muted italic">
-                  ⚠ {g.interpretationCaution}
+                  ⚠ {g.interpretation_caution}
                 </p>
               )}
               <div className="flex justify-between items-center mt-2">
                 <span className="text-[0.69rem] text-mapsa-muted">
-                  {g.contributorName} · {g.status} · v{g.version}
+                  {g.contributor_name} · {g.status} · v{g.version}
                 </span>
                 <button
                   className="mapsa-btn text-2xs py-0.5 px-2"
                   onClick={(e) => {
                     e.stopPropagation();
-                    copyToClipboard(g.citationText);
+                    copyToClipboard(g.citation_text || "");
                   }}
                 >
                   Copy Citation
                 </button>
               </div>
-              {g.sourceIds.length > 0 && (
+              {g.source_ids && g.source_ids.length > 0 && (
                 <p className="text-[0.69rem] text-mapsa-muted mt-1.5">
                   Sources:{" "}
-                  {g.sourceIds
+                  {g.source_ids
                     .map(
                       (sid) =>
                         sources.find((s) => s.id === sid)?.author || sid

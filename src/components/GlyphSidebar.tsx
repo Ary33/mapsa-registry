@@ -2,7 +2,6 @@
 
 import type {
   InscriptionRecord,
-  Source,
   Annotation,
   CandidateElement,
   GroupingHypothesis,
@@ -18,7 +17,6 @@ import { useState } from "react";
 
 interface GlyphSidebarProps {
   record: InscriptionRecord;
-  sources: Source[];
   annotations: Annotation[];
   selectedElements: CandidateElement[];
   lockedEls: string[];
@@ -30,11 +28,16 @@ interface GlyphSidebarProps {
   onSubmitAnnotation: (form: AnnotationFormData) => void;
 }
 
-type SidebarMode = "glyph" | "evidence" | "annotations" | "sources" | "citation" | "photo";
+type SidebarMode =
+  | "glyph"
+  | "evidence"
+  | "annotations"
+  | "sources"
+  | "citation"
+  | "photo";
 
 export default function GlyphSidebar({
   record,
-  sources,
   annotations,
   selectedElements,
   lockedEls,
@@ -54,8 +57,8 @@ export default function GlyphSidebar({
   // Annotations for selected elements
   const relevantAnnotations = annotations.filter(
     (ann) =>
-      selectedElements.some((el) => ann.targetId === el.id) ||
-      ann.targetId === record.id
+      selectedElements.some((el) => ann.target_id === el.id) ||
+      ann.target_id === record.id
   );
 
   return (
@@ -91,7 +94,6 @@ export default function GlyphSidebar({
       {mode === "glyph" && (
         <div className="flex-1 flex flex-col min-h-0">
           {!hasSelection ? (
-            /* Empty state */
             <div className="flex-1 flex flex-col items-center justify-center gap-3 px-7 text-center opacity-40">
               <span className="text-3xl">◈</span>
               <span className="font-cinzel text-sm tracking-[0.15em] text-mapsa-gold/80">
@@ -108,7 +110,6 @@ export default function GlyphSidebar({
               </span>
             </div>
           ) : (
-            /* Element detail */
             <div className="flex-1 overflow-y-auto">
               {/* Header */}
               <div className="px-5 pt-4 pb-3 border-b border-mapsa-border">
@@ -124,7 +125,7 @@ export default function GlyphSidebar({
                 </div>
                 {singleEl && (
                   <div className="font-garamond text-sm text-mapsa-muted italic mt-1">
-                    {singleEl.segmentationStatus}
+                    {singleEl.segmentation_status}
                   </div>
                 )}
               </div>
@@ -138,21 +139,29 @@ export default function GlyphSidebar({
                       Epigraphic Description
                     </div>
                     <p className="font-garamond text-sm leading-[1.75] text-mapsa-text">
-                      {singleEl.neutralDescription}
+                      {singleEl.neutral_description}
                     </p>
-                    {/* Tags */}
                     <div className="flex flex-wrap gap-1.5 mt-2.5">
                       <span className="mapsa-tag">
-                        {CONFIDENCE_ICON[singleEl.confidence]} {singleEl.confidence}
+                        {CONFIDENCE_ICON[singleEl.confidence]}{" "}
+                        {singleEl.confidence}
                       </span>
                       <span className="mapsa-tag mapsa-tag-epi">
-                        {singleEl.segmentationStatus}
+                        {singleEl.segmentation_status}
                       </span>
+                      {singleEl.inferred_overlay_path && (
+                        <span
+                          className="mapsa-tag"
+                          style={{ borderColor: "#7ea8be", color: "#7ea8be" }}
+                        >
+                          has inferred reconstruction
+                        </span>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {/* Multi-select: show all selected elements */}
+                {/* Multi-select */}
                 {!singleEl &&
                   selectedElements.map((el) => (
                     <div
@@ -163,7 +172,7 @@ export default function GlyphSidebar({
                         {el.label}
                       </p>
                       <p className="font-garamond text-sm text-mapsa-text leading-relaxed">
-                        {el.neutralDescription}
+                        {el.neutral_description}
                       </p>
                       <span className="mapsa-tag text-[0.5rem] mt-1 inline-block">
                         {CONFIDENCE_ICON[el.confidence]} {el.confidence}
@@ -204,14 +213,15 @@ export default function GlyphSidebar({
                         <p className="font-garamond text-xs text-mapsa-text italic leading-relaxed">
                           {g.interpretation}
                         </p>
-                        {g.interpretationCaution && (
+                        {g.interpretation_caution && (
                           <p className="font-garamond text-xs text-mapsa-muted mt-1">
-                            ⚠ {g.interpretationCaution}
+                            ⚠ {g.interpretation_caution}
                           </p>
                         )}
                         <div className="flex items-center gap-2 mt-2">
                           <span className="font-garamond text-[0.6rem] text-mapsa-muted">
-                            {g.contributorName} · v{g.version} · {g.dateSubmitted}
+                            {g.contributor_name} · v{g.version} ·{" "}
+                            {g.created_at?.split("T")[0]}
                           </span>
                           <span className="mapsa-tag text-[0.5rem]">
                             {CONFIDENCE_ICON[g.confidence]} {g.confidence}
@@ -222,35 +232,40 @@ export default function GlyphSidebar({
                   </div>
                 )}
 
-                {/* All groupings for this record */}
-                {lockedEls.length > 0 && matchingGroupings.length === 0 && (
-                  <div>
-                    <div className="mapsa-section-label">
-                      All Groupings for Record
-                    </div>
-                    {record.groupings.map((g) => (
-                      <div
-                        key={g.id}
-                        className="mb-2 p-2 rounded border border-mapsa-border/50 bg-mapsa-panel-alt/50 cursor-pointer hover:border-mapsa-gold/30 transition-colors"
-                        onClick={() => onSelectGrouping(g)}
-                      >
-                        <span className="font-cinzel text-xs text-mapsa-gold/80">
-                          {g.title}
-                        </span>
-                        <span className="font-mono text-[0.5rem] text-mapsa-muted ml-2">
-                          [{g.elementIds.join(", ")}]
-                        </span>
+                {/* All groupings when no match */}
+                {lockedEls.length > 0 &&
+                  matchingGroupings.length === 0 &&
+                  record.groupings.length > 0 && (
+                    <div>
+                      <div className="mapsa-section-label">
+                        All Groupings for Record
                       </div>
-                    ))}
-                  </div>
-                )}
+                      {record.groupings.map((g) => (
+                        <div
+                          key={g.id}
+                          className="mb-2 p-2 rounded border border-mapsa-border/50 bg-mapsa-panel-alt/50 cursor-pointer hover:border-mapsa-gold/30 transition-colors"
+                          onClick={() => onSelectGrouping(g)}
+                        >
+                          <span className="font-cinzel text-xs text-mapsa-gold/80">
+                            {g.title}
+                          </span>
+                          <span className="font-mono text-[0.5rem] text-mapsa-muted ml-2">
+                            [{g.element_ids?.length || 0} elements]
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                 {/* Relevant annotations */}
                 {relevantAnnotations.length > 0 && (
                   <div>
                     <div className="mapsa-section-label">Annotations</div>
                     {relevantAnnotations
-                      .filter((a) => a.status === "published")
+                      .filter(
+                        (a) =>
+                          a.status === "published" || a.status === "pending"
+                      )
                       .slice(0, 5)
                       .map((ann) => (
                         <div
@@ -258,14 +273,17 @@ export default function GlyphSidebar({
                           className="mb-2.5 border-l-2 border-mapsa-gold/30 pl-3"
                         >
                           <p className="font-mono text-[0.5rem] text-mapsa-gold/70 mb-0.5">
-                            {ann.contributorName}
-                            {ann.affiliation && ` · ${ann.affiliation}`}
+                            {ann.contributor_name}
+                            {ann.contributor_affiliation &&
+                              ` · ${ann.contributor_affiliation}`}
                           </p>
                           <p className="font-garamond text-xs text-mapsa-text leading-relaxed">
                             {ann.body}
                           </p>
                           <p className="font-garamond text-[0.56rem] text-mapsa-muted italic mt-0.5">
-                            {ann.type} · {ann.dateSubmitted} · {CONFIDENCE_ICON[ann.confidence]} {ann.confidence}
+                            {ann.type} · {ann.created_at?.split("T")[0]} ·{" "}
+                            {CONFIDENCE_ICON[ann.confidence]} {ann.confidence}
+                            {ann.status === "pending" && " · ⏳ pending"}
                           </p>
                         </div>
                       ))}
@@ -275,10 +293,9 @@ export default function GlyphSidebar({
             </div>
           )}
 
-          {/* Legend + navigation (always visible at bottom) */}
+          {/* Legend + navigation */}
           <div className="shrink-0 border-t border-mapsa-border bg-mapsa-panel-alt">
-            {/* Element legend */}
-            <div className="px-4 py-2.5 flex flex-col gap-1">
+            <div className="px-4 py-2.5 flex flex-col gap-1 max-h-[200px] overflow-y-auto">
               {record.elements.map((el) => {
                 const isActive = lockedEls.includes(el.id);
                 return (
@@ -297,21 +314,27 @@ export default function GlyphSidebar({
                         background: isActive
                           ? "var(--mapsa-gold, #c8a96e)"
                           : "rgba(212,168,75,0.1)",
-                        borderColor: isActive
-                          ? "var(--mapsa-gold, #c8a96e)"
-                          : "var(--mapsa-gold, #c8a96e)",
+                        borderColor: "var(--mapsa-gold, #c8a96e)",
                       }}
                     />
                     <span className="font-garamond text-xs">
-                      {el.label} · {el.neutralDescription.slice(0, 50)}
-                      {el.neutralDescription.length > 50 ? "…" : ""}
+                      {el.label} ·{" "}
+                      {el.neutral_description.slice(0, 50)}
+                      {el.neutral_description.length > 50 ? "…" : ""}
                     </span>
+                    {el.inferred_overlay_path && (
+                      <span
+                        className="text-[0.5rem] ml-auto shrink-0"
+                        style={{ color: "#7ea8be" }}
+                      >
+                        inf
+                      </span>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            {/* Nav bar */}
             <div className="px-4 py-2 border-t border-mapsa-border flex items-center justify-between">
               <div className="flex gap-2">
                 <button
@@ -347,7 +370,7 @@ export default function GlyphSidebar({
       )}
       {mode === "sources" && (
         <div className="flex-1 overflow-y-auto p-4">
-          <SourcesTab sources={sources} />
+          <SourcesTab sources={record.sources} />
         </div>
       )}
       {mode === "citation" && (

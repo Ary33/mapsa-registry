@@ -37,10 +37,10 @@ export function generateChicago(
 ): string {
   const today = new Date().toISOString().split("T")[0];
   if (!target || target.id === record.id) {
-    return `"${record.title}," MAPSA Monte Albán Inscription Registry, ${record.id}, v${record.recordVersion}, accessed ${today}.`;
+    return `"${record.title}," MAPSA Monte Albán Inscription Registry, ${record.id}, v${record.record_version}, accessed ${today}.`;
   }
-  if ("citationText" in target && target.citationText) {
-    return target.citationText;
+  if ("citation_text" in target && target.citation_text) {
+    return target.citation_text;
   }
   const label = "label" in target ? target.label : target.id;
   return `"${label}," in MAPSA ${record.id}, accessed ${today}.`;
@@ -50,9 +50,9 @@ export function generateAPA(
   record: InscriptionRecord,
   target?: CandidateElement | GroupingHypothesis | Annotation | null
 ): string {
-  const year = record.datePhotographed.slice(0, 4);
+  const year = record.date_photographed.slice(0, 4);
   if (!target || target.id === record.id) {
-    return `MAPSA. (${year}). ${record.title} [${record.id}]. Monte Albán Inscription Registry, v${record.recordVersion}.`;
+    return `MAPSA. (${year}). ${record.title} [${record.id}]. Monte Albán Inscription Registry, v${record.record_version}.`;
   }
   const label = "label" in target ? target.label : target.id;
   return `MAPSA. (${year}). ${label} [${record.id}]. Monte Albán Inscription Registry.`;
@@ -73,7 +73,7 @@ export function generateBibTeX(
   return `@misc{mapsa_${key},
   title={${title}},
   author={MAPSA},
-  year={${record.datePhotographed.slice(0, 4)}},
+  year={${record.date_photographed.slice(0, 4)}},
   note={${record.id}, Monte Albán Inscription Registry}
 }`;
 }

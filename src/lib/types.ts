@@ -1,6 +1,6 @@
 // ─── MAPSA Data Model ────────────────────────────────────────────
-// Clean TypeScript interfaces ready for Supabase migration.
-// When migrating: these become your row types + Supabase generated types.
+// TypeScript interfaces matching the Supabase schema.
+// Used for both client-side rendering and Supabase query typing.
 
 export type ImageType =
   | "full_object"
@@ -60,6 +60,7 @@ export type AnnotationVisibility =
   | "anonymous public";
 
 export type AnnotationStatus =
+  | "draft"
   | "pending"
   | "published"
   | "rejected"
@@ -88,30 +89,31 @@ export type PhotoRequestStatus =
 
 export interface ImageAsset {
   id: string;
+  record_id: string;
   type: ImageType;
   label: string;
-  src: string;
+  storage_path: string;
   caption: string;
   photographer: string;
-  date: string;
-  isPrimaryEvidence: boolean;
+  date_taken: string;
+  is_primary_evidence: boolean;
+  sort_order: number;
 }
 
 export interface Overlay {
   id: string;
-  recordId: string;
+  record_id: string;
   type: OverlayType;
   label: string;
-  author: string;
-  date: string;
-  basedOnImages: string[];
+  storage_path: string | null;
+  based_on_images: string[];
   confidence: OverlayConfidence;
   note: string;
-  visibleByDefault: boolean;
+  visible_by_default: boolean;
 }
 
 export interface BoundingBox {
-  x: number; // percentage
+  x: number;
   y: number;
   width: number;
   height: number;
@@ -119,51 +121,63 @@ export interface BoundingBox {
 
 export interface CandidateElement {
   id: string;
-  recordId: string;
+  record_id: string;
   label: string;
-  neutralDescription: string;
-  segmentationStatus: SegmentationStatus;
-  boundingBox: BoundingBox;
+  neutral_description: string;
+  segmentation_status: SegmentationStatus;
+  bbox_x: number;
+  bbox_y: number;
+  bbox_width: number;
+  bbox_height: number;
   confidence: Confidence;
   notes: string;
+  overlay_path: string | null;
+  inferred_overlay_path: string | null;
+  sort_order: number;
 }
 
 export interface GroupingHypothesis {
   id: string;
-  recordId: string;
+  record_id: string;
   title: string;
-  elementIds: string[];
-  proposedRelationship: ProposedRelationship;
+  element_ids: string[];
+  proposed_relationship: ProposedRelationship;
   interpretation: string;
-  interpretationCaution: string;
-  contributorId: string;
-  contributorName: string;
-  sourceIds: string[];
+  interpretation_caution: string;
+  contributor_id: string;
+  source_ids: string[];
   confidence: Confidence;
   status: GroupingStatus;
   version: string;
-  dateSubmitted: string;
-  citationText: string;
+  is_published: boolean;
+  citation_text: string;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  contributor_name?: string;
 }
 
 export interface Annotation {
   id: string;
-  recordId: string;
-  targetType: "record" | "element" | "grouping" | "source" | "image";
-  targetId: string;
-  contributorId: string;
-  contributorName: string;
-  affiliation?: string;
-  orcid?: string;
+  record_id: string;
+  target_type: "record" | "element" | "grouping" | "source" | "image";
+  target_id: string;
+  contributor_id: string;
   type: AnnotationType;
   body: string;
-  sourcesCited: string[];
+  sources_cited: string[];
   confidence: Confidence;
   visibility: AnnotationVisibility;
   status: AnnotationStatus;
   version: string;
-  dateSubmitted: string;
-  citationText: string;
+  is_published: boolean;
+  citation_text: string;
+  created_at: string;
+  updated_at: string;
+  // Joined fields
+  contributor_name?: string;
+  contributor_affiliation?: string;
+  contributor_orcid?: string;
 }
 
 export interface Source {
@@ -176,55 +190,54 @@ export interface Source {
   url?: string;
   doi?: string;
   notes: string;
-  relatedRecordIds: string[];
+  related_record_ids: string[];
 }
 
 export interface PhotoRequest {
   id: string;
-  recordId: string;
-  requestedBy: string;
-  affiliation?: string;
-  email: string;
-  requestTypes: PhotoRequestType[];
+  record_id: string;
+  requested_by: string;
+  request_types: PhotoRequestType[];
   message: string;
-  permissionToCredit: boolean;
+  permission_to_credit: boolean;
   status: PhotoRequestStatus;
-  dateSubmitted: string;
+  created_at: string;
 }
 
 export interface Contributor {
   id: string;
-  name: string;
+  full_name: string;
   affiliation?: string;
   orcid?: string;
   bio?: string;
-  researchAreas: string[];
-  contributions: string[];
+  research_areas: string[];
+  role: string;
 }
 
 export interface InscriptionRecord {
   id: string;
-  fieldId: string;
+  field_id: string;
   title: string;
   site: string;
   area: string;
   structure: string;
-  objectType: string;
-  locationDescription: string;
-  datePhotographed: string;
+  object_type: string;
+  location_description: string;
+  date_photographed: string;
   photographer: string;
-  recordVersion: string;
+  record_version: string;
   status: string[];
   description: string;
   condition: string;
-  lightingNotes: string;
-  interpretationStatus: string;
-  segmentationStatus: string;
+  lighting_notes: string;
+  interpretation_status: string;
+  segmentation_status: string;
+  background_path: string | null;
+  base_overlay_path: string | null;
+  // Joined relations
   images: ImageAsset[];
-  overlays: Overlay[];
   elements: CandidateElement[];
   groupings: GroupingHypothesis[];
   annotations: Annotation[];
   sources: Source[];
-  photoRequests: PhotoRequest[];
 }

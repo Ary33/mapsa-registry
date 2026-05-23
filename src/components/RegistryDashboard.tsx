@@ -20,10 +20,8 @@ export default function RegistryDashboard({
       r.id.toLowerCase().includes(q) ||
       r.title.toLowerCase().includes(q) ||
       r.structure.toLowerCase().includes(q) ||
-      r.objectType.toLowerCase().includes(q) ||
-      r.status.some((st) => st.toLowerCase().includes(q)) ||
-      r.elements.some((el) => el.label.toLowerCase().includes(q)) ||
-      r.groupings.some((g) => g.id.toLowerCase().includes(q))
+      r.object_type.toLowerCase().includes(q) ||
+      r.status.some((st: string) => st.toLowerCase().includes(q))
     );
   });
 
@@ -55,7 +53,7 @@ export default function RegistryDashboard({
       {/* Search */}
       <input
         className="mapsa-input mb-5 text-base"
-        placeholder="Search by ID, structure, element, source, contributor, status…"
+        placeholder="Search by ID, structure, status…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />

@@ -7,18 +7,18 @@ interface EvidenceTabProps {
 export default function EvidenceTab({ record }: EvidenceTabProps) {
   const fields: [string, string, "mono" | "text"][] = [
     ["Record ID", record.id, "mono"],
-    ["Field ID", record.fieldId, "mono"],
+    ["Field ID", record.field_id, "mono"],
     ["Site", record.site, "text"],
     ["Structure", record.structure, "text"],
-    ["Location", record.locationDescription, "text"],
-    ["Object Type", record.objectType, "text"],
+    ["Location", record.location_description, "text"],
+    ["Object Type", record.object_type, "text"],
     ["Photographer", record.photographer, "text"],
-    ["Date Photographed", record.datePhotographed, "text"],
+    ["Date Photographed", record.date_photographed, "text"],
     ["Condition", record.condition, "text"],
-    ["Lighting Notes", record.lightingNotes, "text"],
-    ["Segmentation Status", record.segmentationStatus, "text"],
-    ["Interpretation Status", record.interpretationStatus, "text"],
-    ["Record Version", record.recordVersion, "mono"],
+    ["Lighting Notes", record.lighting_notes, "text"],
+    ["Segmentation Status", record.segmentation_status, "text"],
+    ["Interpretation Status", record.interpretation_status, "text"],
+    ["Record Version", record.record_version, "mono"],
   ];
 
   return (

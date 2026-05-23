@@ -8,6 +8,7 @@ import type {
   CandidateElement,
   GroupingHypothesis,
 } from "@/lib/types";
+import { overlayUrl, photoUrl, submitAnnotation } from "@/lib/data";
 import type { AnnotationFormData } from "./sidebar/AnnotationsTab";
 import GlyphSidebar from "./GlyphSidebar";
 import StatusBadge from "./StatusBadge";
@@ -15,23 +16,83 @@ import { useAuth } from "@/lib/AuthContext";
 
 interface RecordViewerProps {
   record: InscriptionRecord;
-  sources: Source[];
 }
 
-export default function RecordViewer({ record, sources }: RecordViewerProps) {
-  const { profile } = useAuth();
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement | SVGSVGElement>(null);
+// ─── Canvas hit-detection helper ─────────────────────────────────
+// Loads each overlay PNG into an offscreen canvas for alpha testing.
+interface HitCanvas {
+  elementId: string;
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  width: number;
+  height: number;
+}
 
-  const [activeImg, setActiveImg] = useState(record.images[0]?.id || "");
+function buildHitCanvas(
+  img: HTMLImageElement,
+  elementId: string
+): HitCanvas | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0);
+  return { elementId, canvas, ctx, width: img.naturalWidth, height: img.naturalHeight };
+}
+
+function hitTest(
+  hitCanvases: HitCanvas[],
+  x: number, // 0-1 normalized coordinates
+  y: number
+): string | null {
+  // Test in reverse order (top-most element first)
+  for (let i = hitCanvases.length - 1; i >= 0; i--) {
+    const hc = hitCanvases[i];
+    const px = Math.floor(x * hc.width);
+    const py = Math.floor(y * hc.height);
+    if (px < 0 || px >= hc.width || py < 0 || py >= hc.height) continue;
+    const pixel = hc.ctx.getImageData(px, py, 1, 1).data;
+    if (pixel[3] > 20) {
+      // Non-transparent pixel — hit
+      return hc.elementId;
+    }
+  }
+  return null;
+}
+
+export default function RecordViewer({ record }: RecordViewerProps) {
+  const { profile } = useAuth();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // Layer toggles
+  const [showBackground, setShowBackground] = useState(true);
+  const [showGlyphs, setShowGlyphs] = useState(true);
+  const [showInferred, setShowInferred] = useState(true);
+
+  // Element selection state
   const [hoveredEl, setHoveredEl] = useState<string | null>(null);
   const [lockedEls, setLockedEls] = useState<string[]>([]);
   const [multiSelect, setMultiSelect] = useState(false);
-  const [imgRect, setImgRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
-  const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(record.annotations);
   const [isMobile, setIsMobile] = useState(false);
 
-  // Detect touch/mobile viewport
+  // Annotation state (persisted to Supabase)
+  const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(
+    record.annotations
+  );
+
+  // Hit detection canvases
+  const [hitCanvases, setHitCanvases] = useState<HitCanvas[]>([]);
+  const [overlayImages, setOverlayImages] = useState<
+    Map<string, HTMLImageElement>
+  >(new Map());
+  const [imagesLoaded, setImagesLoaded] = useState(false);
+
+  // Image dimensions for coordinate mapping
+  const [imgRect, setImgRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
+
+  // Detect touch/mobile
   useEffect(() => {
     function checkMobile() {
       setIsMobile(
@@ -45,34 +106,73 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
-  const activeImgData = record.images.find((i) => i.id === activeImg) || record.images[0];
-  const hasRealImage = activeImgData?.src && activeImgData.src.length > 0;
+  // Currently visible elements
+  const visibleEls =
+    hoveredEl && !lockedEls.includes(hoveredEl)
+      ? [...lockedEls, hoveredEl]
+      : lockedEls;
 
-  // Currently visible elements = locked + hovered
-  const visibleEls = hoveredEl && !lockedEls.includes(hoveredEl)
-    ? [...lockedEls, hoveredEl]
-    : lockedEls;
-
-  // Get full element data for visible elements
   const selectedElementData = record.elements.filter((el) =>
     visibleEls.includes(el.id)
   );
 
-  // Get groupings that contain all locked elements
   const matchingGroupings = record.groupings.filter(
     (g) =>
       lockedEls.length > 0 &&
-      lockedEls.every((id) => g.elementIds.includes(id))
+      lockedEls.every((id) => g.element_ids.includes(id))
   );
+
+  // ── Preload overlay images + build hit canvases ──
+  useEffect(() => {
+    const imgMap = new Map<string, HTMLImageElement>();
+    const canvases: HitCanvas[] = [];
+    let loadCount = 0;
+
+    const elementsWithOverlays = record.elements.filter(
+      (el) => el.overlay_path
+    );
+    const totalToLoad = elementsWithOverlays.length;
+
+    if (totalToLoad === 0) {
+      setImagesLoaded(true);
+      return;
+    }
+
+    elementsWithOverlays.forEach((el) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        imgMap.set(el.id, img);
+        const hc = buildHitCanvas(img, el.id);
+        if (hc) canvases.push(hc);
+        loadCount++;
+        if (loadCount === totalToLoad) {
+          setOverlayImages(new Map(imgMap));
+          setHitCanvases([...canvases]);
+          setImagesLoaded(true);
+        }
+      };
+      img.onerror = () => {
+        console.warn(`Failed to load overlay for ${el.label}: ${el.overlay_path}`);
+        loadCount++;
+        if (loadCount === totalToLoad) {
+          setOverlayImages(new Map(imgMap));
+          setHitCanvases([...canvases]);
+          setImagesLoaded(true);
+        }
+      };
+      img.src = overlayUrl(el.overlay_path) || "";
+    });
+  }, [record.elements]);
 
   // ── Layout sync ──
   const syncLayout = useCallback(() => {
-    if (!wrapRef.current || !imgRef.current) return;
-    const wr = wrapRef.current.getBoundingClientRect();
+    if (!containerRef.current || !imgRef.current) return;
+    const cr = containerRef.current.getBoundingClientRect();
     const ir = imgRef.current.getBoundingClientRect();
     setImgRect({
-      left: ir.left - wr.left,
-      top: ir.top - wr.top,
+      left: ir.left - cr.left,
+      top: ir.top - cr.top,
       width: ir.width,
       height: ir.height,
     });
@@ -80,13 +180,24 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
 
   useEffect(() => {
     syncLayout();
-    const t = setTimeout(syncLayout, 200);
+    const t = setTimeout(syncLayout, 300);
     window.addEventListener("resize", syncLayout);
     return () => {
       clearTimeout(t);
       window.removeEventListener("resize", syncLayout);
     };
-  }, [syncLayout, activeImg]);
+  }, [syncLayout, showBackground]);
+
+  // ── Mouse/touch coordinate → element hit ──
+  function getHitElement(clientX: number, clientY: number): string | null {
+    if (!containerRef.current || hitCanvases.length === 0) return null;
+    const cr = containerRef.current.getBoundingClientRect();
+    // Map to image-relative normalized coordinates
+    const relX = (clientX - cr.left - imgRect.left) / imgRect.width;
+    const relY = (clientY - cr.top - imgRect.top) / imgRect.height;
+    if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return null;
+    return hitTest(hitCanvases, relX, relY);
+  }
 
   // ── Keyboard controls ──
   useEffect(() => {
@@ -98,7 +209,6 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
       if (e.key === "m" || e.key === "M") {
         setMultiSelect((prev) => !prev);
       }
-      // Arrow navigation through elements
       if (e.key === "ArrowRight" || e.key === "ArrowDown") {
         e.preventDefault();
         navElement(1);
@@ -106,13 +216,6 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
       if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
         e.preventDefault();
         navElement(-1);
-      }
-      // Number keys to jump to element
-      const num = parseInt(e.key);
-      if (num >= 1 && num <= record.elements.length) {
-        const el = record.elements[num - 1];
-        setLockedEls([el.id]);
-        setMultiSelect(false);
       }
     }
     window.addEventListener("keydown", onKey);
@@ -122,7 +225,10 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
   function navElement(dir: number) {
     const currentId = lockedEls[lockedEls.length - 1] || hoveredEl;
     const idx = record.elements.findIndex((el) => el.id === currentId);
-    const next = idx < 0 ? 0 : (idx + dir + record.elements.length) % record.elements.length;
+    const next =
+      idx < 0
+        ? 0
+        : (idx + dir + record.elements.length) % record.elements.length;
     setLockedEls([record.elements[next].id]);
     setMultiSelect(false);
   }
@@ -140,7 +246,7 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
   }
 
   function handleSelectGrouping(g: GroupingHypothesis) {
-    setLockedEls(g.elementIds);
+    setLockedEls(g.element_ids);
     setMultiSelect(false);
   }
 
@@ -149,37 +255,76 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
     setMultiSelect(false);
   }
 
-  const submitAnnotation = useCallback(
-    (form: AnnotationFormData) => {
-      const newAnn: Annotation = {
-        id: `ann-${Date.now()}`,
-        recordId: record.id,
-        targetType: form.targetType as Annotation["targetType"],
-        targetId: form.targetId || record.id,
-        contributorId: profile?.id || "contrib-new",
-        contributorName: profile?.full_name || form.name,
-        affiliation: profile?.affiliation || form.affiliation || undefined,
-        orcid: profile?.orcid || form.orcid || undefined,
-        type: form.type as Annotation["type"],
+  // ── Annotation submission (writes to Supabase) ──
+  const handleSubmitAnnotation = useCallback(
+    async (form: AnnotationFormData) => {
+      if (!profile) return;
+
+      const { data, error } = await submitAnnotation({
+        record_id: record.id,
+        target_type: form.targetType,
+        target_id: form.targetId || record.id,
+        contributor_id: profile.id,
+        type: form.type,
         body:
           form.body +
           (form.boundaryCorrection
             ? `\n\n[Boundary correction suggestion: ${form.boundaryCorrection}]`
             : ""),
-        sourcesCited: form.sourcesCited
+        sources_cited: form.sourcesCited
           ? form.sourcesCited.split(",").map((s) => s.trim())
           : [],
-        confidence: form.confidence as Annotation["confidence"],
-        visibility: form.visibility as Annotation["visibility"],
-        status: "pending",
-        version: "1.0",
-        dateSubmitted: new Date().toISOString().split("T")[0],
-        citationText: `${profile?.full_name || form.name}, ${form.type}, MAPSA ${record.id}, ${new Date().getFullYear()}.`,
-      };
-      setLocalAnnotations((prev) => [newAnn, ...prev]);
+        confidence: form.confidence,
+        visibility: form.visibility,
+      });
+
+      if (error) {
+        console.error("Annotation submission error:", error);
+        return;
+      }
+
+      if (data) {
+        // Add to local state with contributor info
+        const newAnn: Annotation = {
+          ...data,
+          contributor_name: profile.full_name,
+          contributor_affiliation: profile.affiliation || undefined,
+          contributor_orcid: profile.orcid || undefined,
+        };
+        setLocalAnnotations((prev) => [newAnn, ...prev]);
+      }
     },
     [record.id, profile]
   );
+
+  // ── Resolve image URLs ──
+  const backgroundUrl = photoUrl(record.background_path);
+  const baseOverlayUrl = overlayUrl(record.base_overlay_path);
+
+  // ── Get glow style for an overlay element ──
+  function getOverlayStyle(elId: string): React.CSSProperties {
+    const isHovered = hoveredEl === elId;
+    const isLocked = lockedEls.includes(elId);
+
+    if (isLocked) {
+      return {
+        filter:
+          "drop-shadow(0 0 4px rgba(255,240,180,0.6)) drop-shadow(0 0 12px rgba(255,220,120,0.35)) drop-shadow(0 0 22px rgba(255,200,80,0.15))",
+        opacity: 1,
+      };
+    }
+    if (isHovered) {
+      return {
+        filter:
+          "drop-shadow(0 0 3px rgba(255,240,180,0.35)) drop-shadow(0 0 8px rgba(255,220,120,0.2))",
+        opacity: 1,
+      };
+    }
+    return {
+      filter: "none",
+      opacity: 0.85,
+    };
+  }
 
   return (
     <div>
@@ -193,43 +338,84 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
           />
         ))}
         <span className="mapsa-mono text-[0.69rem] ml-auto">
-          v{record.recordVersion}
+          v{record.record_version}
         </span>
       </div>
 
       {/* Split layout */}
-      <div className="flex flex-col lg:flex-row" style={{ minHeight: "calc(100vh - 120px)" }}>
+      <div
+        className="flex flex-col lg:flex-row"
+        style={{ minHeight: "calc(100vh - 120px)" }}
+      >
         {/* ── LEFT: Image + overlays ── */}
         <div className="flex-1 min-w-[320px] flex flex-col border-r border-mapsa-border overflow-hidden">
-          {/* Image tabs */}
-          <div className="flex gap-1 flex-wrap px-4 pt-3 pb-2 shrink-0">
-            {record.images.map((img) => (
-              <button
-                key={img.id}
-                onClick={() => setActiveImg(img.id)}
-                className={`mapsa-tab py-1.5 px-2.5 text-2xs ${activeImg === img.id ? "mapsa-tab-active" : ""}`}
-              >
-                {img.label}
-              </button>
-            ))}
+          {/* Layer toggles */}
+          <div className="flex gap-2 flex-wrap px-4 pt-3 pb-2 shrink-0 border-b border-mapsa-border/40">
+            <span className="mapsa-label self-center mr-1">Layers</span>
+            <button
+              onClick={() => setShowBackground((p) => !p)}
+              className={`mapsa-btn text-2xs ${showBackground ? "mapsa-btn-active" : ""}`}
+            >
+              Background
+            </button>
+            <button
+              onClick={() => setShowGlyphs((p) => !p)}
+              className={`mapsa-btn text-2xs ${showGlyphs ? "mapsa-btn-active" : ""}`}
+            >
+              Glyph Shapes
+            </button>
+            <button
+              onClick={() => setShowInferred((p) => !p)}
+              className={`mapsa-btn text-2xs ${showInferred ? "mapsa-btn-active" : ""}`}
+              style={{
+                borderColor: showInferred ? "#7ea8be" : undefined,
+                background: showInferred ? "#7ea8be" : undefined,
+                color: showInferred ? "#18140f" : undefined,
+              }}
+            >
+              Inferred
+            </button>
           </div>
 
           {/* Image area */}
           <div className="flex-1 min-h-0 px-4 pb-2">
             <div
-              ref={wrapRef}
+              ref={containerRef}
               className="relative h-full overflow-hidden rounded-md border border-mapsa-border"
-              onClick={() => {
-                if (!multiSelect) {
+              style={{ cursor: showGlyphs ? "crosshair" : "default" }}
+              onMouseMove={(e) => {
+                if (isMobile || !showGlyphs) return;
+                const hit = getHitElement(e.clientX, e.clientY);
+                setHoveredEl(hit);
+              }}
+              onMouseLeave={() => {
+                if (isMobile) return;
+                setHoveredEl(null);
+              }}
+              onClick={(e) => {
+                if (!showGlyphs) return;
+                const hit = getHitElement(e.clientX, e.clientY);
+                if (hit) {
+                  handleClickElement(hit);
+                } else if (!multiSelect) {
                   setLockedEls([]);
                 }
               }}
+              onTouchEnd={(e) => {
+                if (!showGlyphs || !e.changedTouches[0]) return;
+                const touch = e.changedTouches[0];
+                const hit = getHitElement(touch.clientX, touch.clientY);
+                if (hit) {
+                  handleClickElement(hit);
+                }
+              }}
             >
-              {hasRealImage ? (
+              {/* Base photograph */}
+              {showBackground && backgroundUrl && (
                 <img
-                  ref={imgRef as React.RefObject<HTMLImageElement>}
-                  src={activeImgData.src}
-                  alt={activeImgData.label}
+                  ref={imgRef}
+                  src={backgroundUrl}
+                  alt="Base photograph"
                   className="block h-full w-auto max-w-full object-contain select-none"
                   style={{
                     objectPosition: "top left",
@@ -238,122 +424,103 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
                   onLoad={() => setTimeout(syncLayout, 50)}
                   draggable={false}
                 />
-              ) : (
-                <svg
-                  ref={imgRef as React.RefObject<SVGSVGElement>}
-                  viewBox="0 0 600 500"
-                  className="block h-full w-auto max-w-full"
-                >
-                  <defs>
-                    <linearGradient id="sg" x1="0" y1="0" x2="1" y2="1">
-                      <stop offset="0%" stopColor="#3a332c" />
-                      <stop offset="50%" stopColor="#2a2419" />
-                      <stop offset="100%" stopColor="#1f1a14" />
-                    </linearGradient>
-                    <filter id="gr">
-                      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="4" />
-                      <feColorMatrix type="saturate" values="0" />
-                      <feBlend in="SourceGraphic" mode="multiply" />
-                    </filter>
-                  </defs>
-                  <rect width="600" height="500" fill="url(#sg)" />
-                  <rect width="600" height="500" fill="rgba(0,0,0,0.12)" filter="url(#gr)" />
-                  <g opacity="0.35" stroke="#c8a96e" strokeWidth="1.5" fill="none">
-                    <path d="M 140 80 Q 160 50 200 55 Q 240 60 250 90 Q 255 120 240 140 Q 220 160 200 155 Q 180 150 170 130 Q 160 110 140 80 Z" />
-                    <circle cx="210" cy="85" r="5" />
-                    <circle cx="380" cy="120" r="8" />
-                    <circle cx="375" cy="165" r="8" />
-                    <circle cx="385" cy="210" r="8" />
-                    <rect x="100" y="310" width="320" height="130" rx="4" />
-                    <path d="M 130 340 L 390 340" />
-                    <path d="M 130 380 Q 260 370 390 380" />
-                  </g>
-                  <text x="300" y="470" textAnchor="middle" fill="#b8ac98" fontFamily="Cinzel" fontSize="11" letterSpacing="2" opacity="0.6">
-                    {activeImgData.label}
-                  </text>
-                </svg>
               )}
 
-              {/* Element hotspot overlays */}
-              {record.elements.map((el) => {
-                const isHovered = hoveredEl === el.id;
-                const isLocked = lockedEls.includes(el.id);
-                const isVisible = isHovered || isLocked;
+              {/* Fallback: base overlay as background when photo is hidden */}
+              {!showBackground && baseOverlayUrl && (
+                <img
+                  ref={imgRef}
+                  src={baseOverlayUrl}
+                  alt="Line drawing"
+                  className="block h-full w-auto max-w-full object-contain select-none"
+                  style={{ objectPosition: "top left" }}
+                  onLoad={() => setTimeout(syncLayout, 50)}
+                  draggable={false}
+                />
+              )}
 
-                return (
-                  <div
-                    key={el.id}
-                    className="absolute cursor-pointer"
-                    style={{
-                      left: `${imgRect.left + (el.boundingBox.x / 100) * imgRect.width}px`,
-                      top: `${imgRect.top + (el.boundingBox.y / 100) * imgRect.height}px`,
-                      width: `${(el.boundingBox.width / 100) * imgRect.width}px`,
-                      height: `${(el.boundingBox.height / 100) * imgRect.height}px`,
-                      zIndex: isVisible ? 20 : 10,
-                      minWidth: "44px",
-                      minHeight: "44px",
-                    }}
-                    onMouseEnter={() => {
-                      if (isMobile) return;
-                      if (!lockedEls.length || multiSelect) setHoveredEl(el.id);
-                    }}
-                    onMouseLeave={() => {
-                      if (isMobile) return;
-                      setHoveredEl(null);
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleClickElement(el.id);
-                    }}
-                  >
-                    {/* Glow box */}
-                    <div
-                      className="absolute inset-0 rounded-sm"
+              {/* Glyph shape overlays */}
+              {showGlyphs &&
+                imagesLoaded &&
+                record.elements.map((el) => {
+                  const url = overlayUrl(el.overlay_path);
+                  if (!url) return null;
+                  return (
+                    <img
+                      key={`glyph-${el.id}`}
+                      src={url}
+                      alt={el.label}
+                      className="absolute top-0 left-0 h-full w-auto max-w-full object-contain pointer-events-none select-none"
                       style={{
-                        transition: "all 0.3s ease",
-                        border: isLocked
-                          ? "2px solid rgba(200,169,110,0.85)"
-                          : isHovered
-                            ? "2px solid rgba(200,169,110,0.5)"
-                            : "1px solid rgba(200,169,110,0.1)",
-                        background: isLocked
-                          ? "rgba(200,169,110,0.1)"
-                          : isHovered
-                            ? "rgba(200,169,110,0.05)"
-                            : "transparent",
-                        boxShadow: isLocked
-                          ? "0 0 6px rgba(255,240,180,0.5), 0 0 16px rgba(255,220,120,0.3), 0 0 28px rgba(255,200,80,0.15), inset 0 0 8px rgba(200,169,110,0.08)"
-                          : isHovered
-                            ? "0 0 4px rgba(255,240,180,0.25), 0 0 10px rgba(255,220,120,0.15)"
-                            : "none",
+                        objectPosition: "top left",
+                        transition: "filter 0.2s ease, opacity 0.2s ease",
+                        ...getOverlayStyle(el.id),
                       }}
+                      draggable={false}
                     />
-                    {/* Label */}
-                    <span
-                      className="absolute -top-5 left-0.5 font-mono text-[0.6rem] tracking-wider font-semibold"
-                      style={{
-                        transition: "all 0.2s ease",
-                        color: isLocked
-                          ? "#e8d49a"
-                          : isHovered
-                            ? "#c8a96e"
-                            : "rgba(200,169,110,0.25)",
-                        textShadow: isLocked
-                          ? "0 0 8px rgba(200,169,110,0.5)"
-                          : "none",
-                      }}
-                    >
-                      {el.label}
-                    </span>
-                    {/* Multi-select checkmark */}
-                    {multiSelect && isLocked && (
-                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-mapsa-gold text-black text-[8px] flex items-center justify-center font-bold z-30">
-                        ✓
+                  );
+                })}
+
+              {/* Inferred reconstruction overlays */}
+              {showInferred &&
+                imagesLoaded &&
+                record.elements
+                  .filter((el) => el.inferred_overlay_path)
+                  .map((el) => {
+                    const url = overlayUrl(el.inferred_overlay_path);
+                    if (!url) return null;
+                    const isHovered = hoveredEl === el.id;
+                    const isLocked = lockedEls.includes(el.id);
+                    return (
+                      <img
+                        key={`inf-${el.id}`}
+                        src={url}
+                        alt={`${el.label} (inferred)`}
+                        className="absolute top-0 left-0 h-full w-auto max-w-full object-contain pointer-events-none select-none"
+                        style={{
+                          objectPosition: "top left",
+                          opacity: isLocked ? 0.7 : isHovered ? 0.55 : 0.4,
+                          filter:
+                            isLocked || isHovered
+                              ? "drop-shadow(0 0 6px rgba(126,168,190,0.5)) hue-rotate(10deg)"
+                              : "hue-rotate(10deg)",
+                          transition: "filter 0.2s ease, opacity 0.2s ease",
+                        }}
+                        draggable={false}
+                      />
+                    );
+                  })}
+
+              {/* Element label overlay */}
+              {showGlyphs && (hoveredEl || lockedEls.length > 0) && (
+                <div className="absolute top-2 left-2 z-30 flex flex-wrap gap-1">
+                  {visibleEls.map((elId) => {
+                    const el = record.elements.find((e) => e.id === elId);
+                    if (!el) return null;
+                    const isLocked = lockedEls.includes(elId);
+                    return (
+                      <span
+                        key={elId}
+                        className="font-mono text-[0.6rem] tracking-wider font-semibold px-1.5 py-0.5 rounded"
+                        style={{
+                          color: isLocked ? "#e8d49a" : "#c8a96e",
+                          background: "rgba(0,0,0,0.6)",
+                          textShadow: isLocked
+                            ? "0 0 8px rgba(200,169,110,0.5)"
+                            : "none",
+                        }}
+                      >
+                        {el.label}
+                        {el.inferred_overlay_path && showInferred && (
+                          <span style={{ color: "#7ea8be", marginLeft: 4 }}>
+                            +inf
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Multi-select indicator */}
               {multiSelect && (
@@ -367,19 +534,22 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
               )}
 
               {/* Hint */}
-              {!lockedEls.length && !hoveredEl && record.elements.length > 0 && (
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-                  <span className="font-cinzel text-[0.5rem] text-mapsa-muted/50 tracking-[0.2em] uppercase bg-black/30 px-3 py-1.5 rounded">
-                    {isMobile
-                      ? "Tap a glyph to select"
-                      : "Hover to preview · Click to lock · M for multi-select · Esc to clear"}
-                  </span>
-                </div>
-              )}
+              {!lockedEls.length &&
+                !hoveredEl &&
+                record.elements.length > 0 &&
+                showGlyphs && (
+                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+                    <span className="font-cinzel text-[0.5rem] text-mapsa-muted/50 tracking-[0.2em] uppercase bg-black/30 px-3 py-1.5 rounded">
+                      {isMobile
+                        ? "Tap a glyph to select"
+                        : "Hover to preview · Click to lock · M for multi-select · Esc to clear"}
+                    </span>
+                  </div>
+                )}
             </div>
           </div>
 
-          {/* Mobile control bar — replaces hover/keyboard interactions */}
+          {/* Mobile control bar */}
           {isMobile && record.elements.length > 0 && (
             <div className="flex items-center gap-2 px-4 py-2 shrink-0 border-t border-mapsa-border bg-mapsa-panel-alt">
               <button
@@ -410,15 +580,14 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
           {/* Caption */}
           <div className="px-4 pb-2 shrink-0">
             <p className="text-[0.69rem] text-mapsa-muted leading-snug">
-              {activeImgData.caption}
+              {record.title}
             </p>
             <p className="text-[0.56rem] text-mapsa-muted">
-              {activeImgData.photographer} · {activeImgData.date}
-              {!activeImgData.isPrimaryEvidence && " · Interpretive aid"}
+              {record.photographer} · {record.date_photographed}
             </p>
           </div>
 
-          {/* Citations panel (below image, like MVP) */}
+          {/* Citations panel */}
           <div className="shrink-0 border-t border-mapsa-border bg-mapsa-panel-alt px-4 py-3 min-h-[120px]">
             {selectedElementData.length === 0 ? (
               <p className="font-garamond text-sm text-mapsa-muted/50 italic">
@@ -434,13 +603,14 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
                     {selectedElementData.map((el) => el.label).join(" + ")}
                   </span>
                 </div>
-                {/* Element-specific annotations as citations */}
                 {localAnnotations
                   .filter(
                     (ann) =>
-                      ann.status === "published" &&
+                      (ann.status === "published" || ann.status === "pending") &&
                       selectedElementData.some(
-                        (el) => ann.targetId === el.id || ann.targetId === record.id
+                        (el) =>
+                          ann.target_id === el.id ||
+                          ann.target_id === record.id
                       )
                   )
                   .slice(0, 3)
@@ -450,8 +620,10 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
                       className="border-l-2 border-mapsa-gold/40 pl-3 py-1.5 mb-2 rounded-r bg-white/[0.03]"
                     >
                       <p className="font-mono text-[0.56rem] text-mapsa-gold mb-0.5">
-                        {ann.contributorName}
-                        {ann.affiliation && ` · ${ann.affiliation}`} · {ann.dateSubmitted}
+                        {ann.contributor_name}
+                        {ann.contributor_affiliation &&
+                          ` · ${ann.contributor_affiliation}`}{" "}
+                        · {ann.created_at?.split("T")[0]}
                       </p>
                       <p className="font-garamond text-xs text-mapsa-text italic leading-snug">
                         {ann.type}
@@ -459,10 +631,14 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
                       <p className="font-garamond text-xs text-mapsa-muted leading-relaxed line-clamp-2">
                         {ann.body}
                       </p>
+                      {ann.status === "pending" && (
+                        <span className="mapsa-tag text-[0.5rem] mt-1 inline-block">
+                          ⏳ pending review
+                        </span>
+                      )}
                     </div>
                   ))}
-                {/* Source citations */}
-                {sources.slice(0, 2).map((src) => (
+                {record.sources.slice(0, 2).map((src) => (
                   <div
                     key={src.id}
                     className="border-l-2 border-mapsa-gold/30 pl-3 py-1 mb-1.5 rounded-r bg-white/[0.02]"
@@ -475,7 +651,7 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
                     </p>
                     <p className="font-garamond text-[0.6rem] text-mapsa-muted">
                       {src.publication}
-                      {src.pages && `, pp. ${src.pages}`}
+                      {src.pages && `, ${src.pages}`}
                     </p>
                   </div>
                 ))}
@@ -487,7 +663,6 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
         {/* ── RIGHT: Sidebar ── */}
         <GlyphSidebar
           record={record}
-          sources={sources}
           annotations={localAnnotations}
           selectedElements={selectedElementData}
           lockedEls={lockedEls}
@@ -496,7 +671,7 @@ export default function RecordViewer({ record, sources }: RecordViewerProps) {
           onToggleMultiSelect={() => setMultiSelect((prev) => !prev)}
           onSelectElement={handleSelectElement}
           onSelectGrouping={handleSelectGrouping}
-          onSubmitAnnotation={submitAnnotation}
+          onSubmitAnnotation={handleSubmitAnnotation}
         />
       </div>
 

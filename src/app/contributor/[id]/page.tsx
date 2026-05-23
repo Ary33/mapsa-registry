@@ -2,30 +2,36 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import Toolbar from "@/components/Toolbar";
 import Footer from "@/components/Footer";
-import { contributors } from "@/data/contributors";
-import { records } from "@/data/records";
+import { supabase } from "@/lib/supabase";
 import { getGroupColor } from "@/lib/utils";
 
 interface ContributorPageProps {
   params: { id: string };
 }
 
-export function generateStaticParams() {
-  return contributors.map((c) => ({ id: c.id }));
-}
+export default async function ContributorPage({ params }: ContributorPageProps) {
+  // Fetch contributor profile
+  const { data: contributor, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", params.id)
+    .single();
 
-export default function ContributorPage({ params }: ContributorPageProps) {
-  const contributor = contributors.find((c) => c.id === params.id);
-  if (!contributor) return notFound();
+  if (error || !contributor) return notFound();
 
-  const allAnnotations = records.flatMap((r) => r.annotations);
-  const allGroupings = records.flatMap((r) => r.groupings);
-  const contribAnnotations = allAnnotations.filter(
-    (a) => a.contributorId === contributor.id
-  );
-  const contribGroupings = allGroupings.filter(
-    (g) => g.contributorId === contributor.id
-  );
+  // Fetch contributor's annotations
+  const { data: annotations } = await supabase
+    .from("annotations")
+    .select("id, type, target_id, target_type, record_id, created_at")
+    .eq("contributor_id", params.id)
+    .order("created_at", { ascending: false });
+
+  // Fetch contributor's groupings
+  const { data: groupings } = await supabase
+    .from("groupings")
+    .select("id, title, record_id, created_at")
+    .eq("contributor_id", params.id)
+    .order("created_at", { ascending: false });
 
   return (
     <>
@@ -41,7 +47,7 @@ export default function ContributorPage({ params }: ContributorPageProps) {
         </nav>
 
         <h1 className="mapsa-section-title !text-base">
-          {contributor.name}
+          {contributor.full_name}
         </h1>
         {contributor.affiliation && (
           <p className="text-sm text-mapsa-muted mb-1">
@@ -55,11 +61,11 @@ export default function ContributorPage({ params }: ContributorPageProps) {
           <p className="text-sm leading-relaxed mb-3">{contributor.bio}</p>
         )}
 
-        {contributor.researchAreas.length > 0 && (
+        {contributor.research_areas?.length > 0 && (
           <div className="mb-4">
             <div className="mapsa-label">Research Areas</div>
             <div className="flex gap-1.5 flex-wrap mt-1">
-              {contributor.researchAreas.map((ra) => (
+              {contributor.research_areas.map((ra: string) => (
                 <span key={ra} className="mapsa-badge">
                   {ra}
                 </span>
@@ -69,19 +75,19 @@ export default function ContributorPage({ params }: ContributorPageProps) {
         )}
 
         <div className="mapsa-label mt-6">
-          Annotations ({contribAnnotations.length})
+          Annotations ({annotations?.length || 0})
         </div>
-        {contribAnnotations.map((a) => (
+        {(annotations || []).map((a: any) => (
           <div key={a.id} className="mapsa-card mt-2">
-            <span className="mapsa-mono">{a.id}</span> — {a.type} on{" "}
-            {a.targetId}
+            <span className="mapsa-mono">{a.record_id}</span> — {a.type} on{" "}
+            {a.target_id}
           </div>
         ))}
 
         <div className="mapsa-label mt-6">
-          Grouping Hypotheses ({contribGroupings.length})
+          Grouping Hypotheses ({groupings?.length || 0})
         </div>
-        {contribGroupings.map((g) => (
+        {(groupings || []).map((g: any) => (
           <div key={g.id} className="mapsa-card mt-2">
             <span
               className="mapsa-mono"

@@ -211,20 +211,20 @@ export default function AnnotationsTab({
           <div key={a.id} className="mapsa-card">
             <div className="flex justify-between items-center mb-1.5">
               <span className="font-semibold text-sm">
-                {a.contributorName}
+                {a.contributor_name}
               </span>
               <span className="mapsa-badge text-2xs">{a.type}</span>
             </div>
             <p className="text-[0.69rem] text-mapsa-muted mb-1.5">
-              {a.affiliation && `${a.affiliation} · `}
-              {a.orcid && `ORCID: ${a.orcid} · `}
+              {a.contributor_affiliation && `${a.contributor_affiliation} · `}
+              {a.contributor_orcid && `ORCID: ${a.contributor_orcid} · `}
               {CONFIDENCE_ICON[a.confidence]} {a.confidence} ·{" "}
-              {a.dateSubmitted} · v{a.version}
+              {a.created_at?.split("T")[0]} · v{a.version}
             </p>
             <p className="text-sm leading-relaxed mb-2">{a.body}</p>
-            {a.sourcesCited.length > 0 && (
+            {a.sources_cited && a.sources_cited.length > 0 && (
               <p className="text-[0.69rem] text-mapsa-muted">
-                Sources cited: {a.sourcesCited.join(", ")}
+                Sources cited: {a.sources_cited.join(", ")}
               </p>
             )}
             <div className="flex justify-between items-center mt-1.5">
@@ -233,7 +233,7 @@ export default function AnnotationsTab({
               </span>
               <button
                 className="mapsa-btn text-2xs py-0.5 px-2"
-                onClick={() => copyToClipboard(a.citationText)}
+                onClick={() => copyToClipboard(a.citation_text || "")}
               >
                 Copy Citation
               </button>

@@ -33,10 +33,10 @@ export default function ElementsTab({
                 </span>
               </div>
               <p className="text-[0.81rem] leading-relaxed mb-1.5">
-                {el.neutralDescription}
+                {el.neutral_description}
               </p>
               <div className="mapsa-label text-2xs">
-                {el.segmentationStatus}
+                {el.segmentation_status}
               </div>
               {el.notes && (
                 <p className="text-xs text-mapsa-muted mt-1">{el.notes}</p>

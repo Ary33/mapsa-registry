@@ -3,7 +3,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import type {
   InscriptionRecord,
-  Source,
   Annotation,
   CandidateElement,
   GroupingHypothesis,
@@ -18,52 +17,60 @@ interface RecordViewerProps {
   record: InscriptionRecord;
 }
 
-// ─── Canvas hit-detection helper ─────────────────────────────────
-// Loads each overlay PNG into an offscreen canvas for alpha testing.
-interface HitCanvas {
-  elementId: string;
-  canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
+// ─── Bounding box from PNG alpha channel ─────────────────────────
+interface ElementBBox {
+  id: string;
+  left: number;   // fraction 0-1
+  top: number;
   width: number;
   height: number;
 }
 
-function buildHitCanvas(
+function computeBBox(
   img: HTMLImageElement,
-  elementId: string
-): HitCanvas | null {
-  const canvas = document.createElement("canvas");
+  id: string,
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D
+): ElementBBox | null {
   canvas.width = img.naturalWidth;
   canvas.height = img.naturalHeight;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return null;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(img, 0, 0);
-  return { elementId, canvas, ctx, width: img.naturalWidth, height: img.naturalHeight };
-}
-
-function hitTest(
-  hitCanvases: HitCanvas[],
-  x: number, // 0-1 normalized coordinates
-  y: number
-): string | null {
-  // Test in reverse order (top-most element first)
-  for (let i = hitCanvases.length - 1; i >= 0; i--) {
-    const hc = hitCanvases[i];
-    const px = Math.floor(x * hc.width);
-    const py = Math.floor(y * hc.height);
-    if (px < 0 || px >= hc.width || py < 0 || py >= hc.height) continue;
-    const pixel = hc.ctx.getImageData(px, py, 1, 1).data;
-    if (pixel[3] > 20) {
-      // Non-transparent pixel — hit
-      return hc.elementId;
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+  let found = false;
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      if (data[(y * canvas.width + x) * 4 + 3] > 20) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        found = true;
+      }
     }
   }
-  return null;
+  if (!found) return null;
+  // Add padding (3% of dimension on each side for easier touch/click)
+  const padX = canvas.width * 0.01;
+  const padY = canvas.height * 0.01;
+  minX = Math.max(0, minX - padX);
+  minY = Math.max(0, minY - padY);
+  maxX = Math.min(canvas.width, maxX + padX);
+  maxY = Math.min(canvas.height, maxY + padY);
+  return {
+    id,
+    left: minX / canvas.width,
+    top: minY / canvas.height,
+    width: (maxX - minX) / canvas.width,
+    height: (maxY - minY) / canvas.height,
+  };
 }
 
 export default function RecordViewer({ record }: RecordViewerProps) {
   const { profile } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
   // Layer toggles
@@ -77,36 +84,203 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const [multiSelect, setMultiSelect] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
-  // Annotation state (persisted to Supabase)
+  // Annotations
   const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(
     record.annotations
   );
 
-  // Hit detection canvases
-  const [hitCanvases, setHitCanvases] = useState<HitCanvas[]>([]);
-  const [overlayImages, setOverlayImages] = useState<
-    Map<string, HTMLImageElement>
-  >(new Map());
+  // Overlay loading
+  const [bboxes, setBboxes] = useState<ElementBBox[]>([]);
   const [imagesLoaded, setImagesLoaded] = useState(false);
 
-  // Image dimensions for coordinate mapping
-  const [imgRect, setImgRect] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  // Image layout rect (for positioning overlays + hotspots)
+  const [imgLayout, setImgLayout] = useState({ left: 0, top: 0, width: 0, height: 0 });
 
-  // Detect touch/mobile
+  // Zoom state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+  const pinchStart = useRef<number | null>(null);
+
+  // Glow animation
+  const animRef = useRef<number | null>(null);
+  const phaseRef = useRef(0);
+  const [glowIntensity, setGlowIntensity] = useState(0.5);
+
+  // ── Mobile detection ──
   useEffect(() => {
-    function checkMobile() {
-      setIsMobile(
-        window.innerWidth <= 768 ||
-          "ontouchstart" in window ||
-          navigator.maxTouchPoints > 0
-      );
+    function check() {
+      setIsMobile(window.innerWidth <= 768 || "ontouchstart" in window || navigator.maxTouchPoints > 0);
     }
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
-  // Currently visible elements
+  // ── Glow animation loop ──
+  useEffect(() => {
+    const activeId = lockedEls[0] || hoveredEl;
+    if (!activeId || !showGlyphs) {
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+      return;
+    }
+    function tick() {
+      phaseRef.current += 0.018;
+      setGlowIntensity(0.5 + 0.5 * Math.sin(phaseRef.current));
+      animRef.current = requestAnimationFrame(tick);
+    }
+    animRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+    };
+  }, [hoveredEl, lockedEls, showGlyphs]);
+
+  // ── Preload overlays + compute bounding boxes ──
+  useEffect(() => {
+    const elementsWithOverlays = record.elements.filter((el) => el.overlay_path);
+    if (elementsWithOverlays.length === 0) {
+      setImagesLoaded(true);
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+
+    const boxes: ElementBBox[] = [];
+    let loadCount = 0;
+    const total = elementsWithOverlays.length;
+
+    elementsWithOverlays.forEach((el) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const box = computeBBox(img, el.id, canvas, ctx);
+        if (box) boxes.push(box);
+        loadCount++;
+        if (loadCount === total) {
+          setBboxes(boxes);
+          setImagesLoaded(true);
+        }
+      };
+      img.onerror = () => {
+        console.warn(`Failed to load overlay for ${el.label}`);
+        loadCount++;
+        if (loadCount === total) {
+          setBboxes(boxes);
+          setImagesLoaded(true);
+        }
+      };
+      img.src = overlayUrl(el.overlay_path) || "";
+    });
+  }, [record.elements]);
+
+  // ── Layout sync ──
+  const syncLayout = useCallback(() => {
+    if (!wrapRef.current || !imgRef.current) return;
+    const wr = wrapRef.current.getBoundingClientRect();
+    const ir = imgRef.current.getBoundingClientRect();
+    setImgLayout({
+      left: (ir.left - wr.left) / zoom,
+      top: (ir.top - wr.top) / zoom,
+      width: ir.width / zoom,
+      height: ir.height / zoom,
+    });
+  }, [zoom]);
+
+  useEffect(() => {
+    syncLayout();
+    const t = setTimeout(syncLayout, 300);
+    window.addEventListener("resize", syncLayout);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("resize", syncLayout);
+    };
+  }, [syncLayout, showBackground, imagesLoaded]);
+
+  // ── Zoom controls ──
+  function handleZoom(delta: number) {
+    setZoom((prev) => Math.max(1, Math.min(6, prev + delta)));
+  }
+
+  function resetZoom() {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }
+
+  // Mouse wheel zoom
+  function handleWheel(e: React.WheelEvent) {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      handleZoom(e.deltaY > 0 ? -0.3 : 0.3);
+    }
+  }
+
+  // Pan with mouse drag when zoomed
+  function handleMouseDown(e: React.MouseEvent) {
+    if (zoom <= 1) return;
+    // Only pan with middle mouse or when no glyph layer
+    if (e.button === 1 || !showGlyphs) {
+      setIsPanning(true);
+      panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+      e.preventDefault();
+    }
+  }
+
+  function handleMouseMove(e: React.MouseEvent) {
+    if (isPanning) {
+      setPan({
+        x: panStart.current.panX + (e.clientX - panStart.current.x),
+        y: panStart.current.panY + (e.clientY - panStart.current.y),
+      });
+    }
+  }
+
+  function handleMouseUp() {
+    setIsPanning(false);
+  }
+
+  // Pinch-to-zoom for mobile
+  function handleTouchStart(e: React.TouchEvent) {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchStart.current = Math.hypot(dx, dy);
+    } else if (e.touches.length === 1 && zoom > 1) {
+      setIsPanning(true);
+      panStart.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+        panX: pan.x,
+        panY: pan.y,
+      };
+    }
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    if (e.touches.length === 2 && pinchStart.current !== null) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const scale = dist / pinchStart.current;
+      setZoom((prev) => Math.max(1, Math.min(6, prev * scale)));
+      pinchStart.current = dist;
+    } else if (e.touches.length === 1 && isPanning) {
+      setPan({
+        x: panStart.current.panX + (e.touches[0].clientX - panStart.current.x),
+        y: panStart.current.panY + (e.touches[0].clientY - panStart.current.y),
+      });
+    }
+  }
+
+  function handleTouchEnd() {
+    pinchStart.current = null;
+    setIsPanning(false);
+  }
+
+  // ── Derived state ──
   const visibleEls =
     hoveredEl && !lockedEls.includes(hoveredEl)
       ? [...lockedEls, hoveredEl]
@@ -122,117 +296,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       lockedEls.every((id) => g.element_ids.includes(id))
   );
 
-  // ── Preload overlay images + build hit canvases ──
-  useEffect(() => {
-    const imgMap = new Map<string, HTMLImageElement>();
-    const canvases: HitCanvas[] = [];
-    let loadCount = 0;
-
-    const elementsWithOverlays = record.elements.filter(
-      (el) => el.overlay_path
-    );
-    const totalToLoad = elementsWithOverlays.length;
-
-    if (totalToLoad === 0) {
-      setImagesLoaded(true);
-      return;
-    }
-
-    elementsWithOverlays.forEach((el) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        imgMap.set(el.id, img);
-        const hc = buildHitCanvas(img, el.id);
-        if (hc) canvases.push(hc);
-        loadCount++;
-        if (loadCount === totalToLoad) {
-          setOverlayImages(new Map(imgMap));
-          setHitCanvases([...canvases]);
-          setImagesLoaded(true);
-        }
-      };
-      img.onerror = () => {
-        console.warn(`Failed to load overlay for ${el.label}: ${el.overlay_path}`);
-        loadCount++;
-        if (loadCount === totalToLoad) {
-          setOverlayImages(new Map(imgMap));
-          setHitCanvases([...canvases]);
-          setImagesLoaded(true);
-        }
-      };
-      img.src = overlayUrl(el.overlay_path) || "";
-    });
-  }, [record.elements]);
-
-  // ── Layout sync ──
-  const syncLayout = useCallback(() => {
-    if (!containerRef.current || !imgRef.current) return;
-    const cr = containerRef.current.getBoundingClientRect();
-    const ir = imgRef.current.getBoundingClientRect();
-    setImgRect({
-      left: ir.left - cr.left,
-      top: ir.top - cr.top,
-      width: ir.width,
-      height: ir.height,
-    });
-  }, []);
-
-  useEffect(() => {
-    syncLayout();
-    const t = setTimeout(syncLayout, 300);
-    window.addEventListener("resize", syncLayout);
-    return () => {
-      clearTimeout(t);
-      window.removeEventListener("resize", syncLayout);
-    };
-  }, [syncLayout, showBackground]);
-
-  // ── Mouse/touch coordinate → element hit ──
-  function getHitElement(clientX: number, clientY: number): string | null {
-    if (!containerRef.current || hitCanvases.length === 0) return null;
-    const cr = containerRef.current.getBoundingClientRect();
-    // Map to image-relative normalized coordinates
-    const relX = (clientX - cr.left - imgRect.left) / imgRect.width;
-    const relY = (clientY - cr.top - imgRect.top) / imgRect.height;
-    if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return null;
-    return hitTest(hitCanvases, relX, relY);
-  }
-
-  // ── Keyboard controls ──
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setLockedEls([]);
-        setMultiSelect(false);
-      }
-      if (e.key === "m" || e.key === "M") {
-        setMultiSelect((prev) => !prev);
-      }
-      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-        e.preventDefault();
-        navElement(1);
-      }
-      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-        e.preventDefault();
-        navElement(-1);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [record.elements, lockedEls]);
-
-  function navElement(dir: number) {
-    const currentId = lockedEls[lockedEls.length - 1] || hoveredEl;
-    const idx = record.elements.findIndex((el) => el.id === currentId);
-    const next =
-      idx < 0
-        ? 0
-        : (idx + dir + record.elements.length) % record.elements.length;
-    setLockedEls([record.elements[next].id]);
-    setMultiSelect(false);
-  }
-
+  // ── Click handling ──
   function handleClickElement(id: string) {
     if (multiSelect) {
       setLockedEls((prev) =>
@@ -255,11 +319,48 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     setMultiSelect(false);
   }
 
-  // ── Annotation submission (writes to Supabase) ──
+  // ── Keyboard controls ──
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setLockedEls([]);
+        setMultiSelect(false);
+        resetZoom();
+      }
+      if (e.key === "m" || e.key === "M") {
+        setMultiSelect((prev) => !prev);
+      }
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navElement(1);
+      }
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navElement(-1);
+      }
+      if (e.key === "+" || e.key === "=") handleZoom(0.5);
+      if (e.key === "-") handleZoom(-0.5);
+      if (e.key === "0") resetZoom();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [record.elements, lockedEls, hoveredEl]);
+
+  function navElement(dir: number) {
+    const currentId = lockedEls[lockedEls.length - 1] || hoveredEl;
+    const idx = record.elements.findIndex((el) => el.id === currentId);
+    const next =
+      idx < 0
+        ? 0
+        : (idx + dir + record.elements.length) % record.elements.length;
+    setLockedEls([record.elements[next].id]);
+    setMultiSelect(false);
+  }
+
+  // ── Annotation submission ──
   const handleSubmitAnnotation = useCallback(
     async (form: AnnotationFormData) => {
       if (!profile) return;
-
       const { data, error } = await submitAnnotation({
         record_id: record.id,
         target_type: form.targetType,
@@ -277,14 +378,11 @@ export default function RecordViewer({ record }: RecordViewerProps) {
         confidence: form.confidence,
         visibility: form.visibility,
       });
-
       if (error) {
         console.error("Annotation submission error:", error);
         return;
       }
-
       if (data) {
-        // Add to local state with contributor info
         const newAnn: Annotation = {
           ...data,
           contributor_name: profile.full_name,
@@ -297,33 +395,67 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     [record.id, profile]
   );
 
-  // ── Resolve image URLs ──
+  // ── Resolve URLs ──
   const backgroundUrl = photoUrl(record.background_path);
   const baseOverlayUrl = overlayUrl(record.base_overlay_path);
 
-  // ── Get glow style for an overlay element ──
-  function getOverlayStyle(elId: string): React.CSSProperties {
+  // ── Glow style (animated, matching previous app) ──
+  function getOverlayFilter(elId: string): React.CSSProperties {
+    const isHovered = hoveredEl === elId;
+    const isLocked = lockedEls.includes(elId);
+    const isInferred = record.elements.find((e) => e.id === elId)?.inferred_overlay_path;
+
+    if (isLocked) {
+      return {
+        filter:
+          `drop-shadow(0 0 3px rgba(255,240,180,0.95)) ` +
+          `drop-shadow(0 0 9px rgba(255,220,120,0.80)) ` +
+          `drop-shadow(0 0 18px rgba(255,200,80,0.55))`,
+        opacity: 1,
+      };
+    }
+    if (isHovered) {
+      const a1 = (0.4 + 0.55 * glowIntensity).toFixed(2);
+      const a2 = (0.25 + 0.5 * glowIntensity).toFixed(2);
+      const a3 = (0.1 + 0.35 * glowIntensity).toFixed(2);
+      return {
+        filter:
+          `drop-shadow(0 0 3px rgba(255,240,180,${a1})) ` +
+          `drop-shadow(0 0 9px rgba(255,220,120,${a2})) ` +
+          `drop-shadow(0 0 16px rgba(255,200,80,${a3}))`,
+        opacity: 1,
+      };
+    }
+    return { filter: "none", opacity: 0.85 };
+  }
+
+  // Inferred glow — bright green
+  function getInferredFilter(elId: string): React.CSSProperties {
     const isHovered = hoveredEl === elId;
     const isLocked = lockedEls.includes(elId);
 
     if (isLocked) {
       return {
         filter:
-          "drop-shadow(0 0 4px rgba(255,240,180,0.6)) drop-shadow(0 0 12px rgba(255,220,120,0.35)) drop-shadow(0 0 22px rgba(255,200,80,0.15))",
+          `drop-shadow(0 0 3px rgba(100,255,150,0.95)) ` +
+          `drop-shadow(0 0 9px rgba(80,220,120,0.80)) ` +
+          `drop-shadow(0 0 18px rgba(60,200,100,0.55))`,
         opacity: 1,
       };
     }
     if (isHovered) {
+      const a1 = (0.4 + 0.55 * glowIntensity).toFixed(2);
+      const a2 = (0.25 + 0.5 * glowIntensity).toFixed(2);
+      const a3 = (0.1 + 0.35 * glowIntensity).toFixed(2);
       return {
         filter:
-          "drop-shadow(0 0 3px rgba(255,240,180,0.35)) drop-shadow(0 0 8px rgba(255,220,120,0.2))",
+          `drop-shadow(0 0 3px rgba(100,255,150,${a1})) ` +
+          `drop-shadow(0 0 9px rgba(80,220,120,${a2})) ` +
+          `drop-shadow(0 0 16px rgba(60,200,100,${a3}))`,
         opacity: 1,
       };
     }
-    return {
-      filter: "none",
-      opacity: 0.85,
-    };
+    return { filter: "none", opacity: 1 };
   }
 
   return (
@@ -349,23 +481,23 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       >
         {/* ── LEFT: Image + overlays ── */}
         <div className="flex-1 min-w-[320px] flex flex-col border-r border-mapsa-border overflow-hidden">
-          {/* Layer toggles */}
-          <div className="flex gap-2 flex-wrap px-4 pt-3 pb-2 shrink-0 border-b border-mapsa-border/40">
+          {/* Layer toggles + zoom controls */}
+          <div className="flex gap-2 flex-wrap px-4 pt-3 pb-2 shrink-0 border-b border-mapsa-border/40 items-center">
             <span className="mapsa-label self-center mr-1">Layers</span>
             <button
-              onClick={() => setShowBackground((p) => !p)}
+              onMouseDown={(e) => { e.preventDefault(); setShowBackground((p) => !p); }}
               className={`mapsa-btn text-2xs ${showBackground ? "mapsa-btn-active" : ""}`}
             >
               Background
             </button>
             <button
-              onClick={() => setShowGlyphs((p) => !p)}
+              onMouseDown={(e) => { e.preventDefault(); setShowGlyphs((p) => !p); }}
               className={`mapsa-btn text-2xs ${showGlyphs ? "mapsa-btn-active" : ""}`}
             >
               Glyph Shapes
             </button>
             <button
-              onClick={() => setShowInferred((p) => !p)}
+              onMouseDown={(e) => { e.preventDefault(); setShowInferred((p) => !p); }}
               className={`mapsa-btn text-2xs ${showInferred ? "mapsa-btn-active" : ""}`}
               style={{
                 borderColor: showInferred ? "#7ea8be" : undefined,
@@ -375,6 +507,36 @@ export default function RecordViewer({ record }: RecordViewerProps) {
             >
               Inferred
             </button>
+
+            {/* Zoom controls */}
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                onMouseDown={(e) => { e.preventDefault(); handleZoom(-0.5); }}
+                className="mapsa-btn text-2xs px-2"
+                title="Zoom out"
+              >
+                −
+              </button>
+              <span className="mapsa-mono text-[0.56rem] w-[3em] text-center">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                onMouseDown={(e) => { e.preventDefault(); handleZoom(0.5); }}
+                className="mapsa-btn text-2xs px-2"
+                title="Zoom in"
+              >
+                +
+              </button>
+              {zoom > 1 && (
+                <button
+                  onMouseDown={(e) => { e.preventDefault(); resetZoom(); }}
+                  className="mapsa-btn text-2xs px-2"
+                  title="Reset zoom"
+                >
+                  ⟲
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Image area */}
@@ -382,145 +544,220 @@ export default function RecordViewer({ record }: RecordViewerProps) {
             <div
               ref={containerRef}
               className="relative h-full overflow-hidden rounded-md border border-mapsa-border"
-              style={{ cursor: showGlyphs ? "crosshair" : "default" }}
-              onMouseMove={(e) => {
-                if (isMobile || !showGlyphs) return;
-                const hit = getHitElement(e.clientX, e.clientY);
-                setHoveredEl(hit);
-              }}
+              style={{ cursor: zoom > 1 ? "grab" : "default" }}
+              onWheel={handleWheel}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
               onMouseLeave={() => {
-                if (isMobile) return;
-                setHoveredEl(null);
+                handleMouseUp();
+                if (!isMobile) setHoveredEl(null);
               }}
-              onClick={(e) => {
-                if (!showGlyphs) return;
-                const hit = getHitElement(e.clientX, e.clientY);
-                if (hit) {
-                  handleClickElement(hit);
-                } else if (!multiSelect) {
-                  setLockedEls([]);
-                }
-              }}
-              onTouchEnd={(e) => {
-                if (!showGlyphs || !e.changedTouches[0]) return;
-                const touch = e.changedTouches[0];
-                const hit = getHitElement(touch.clientX, touch.clientY);
-                if (hit) {
-                  handleClickElement(hit);
-                }
-              }}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
             >
-              {/* Base photograph */}
-              {showBackground && backgroundUrl && (
-                <img
-                  ref={imgRef}
-                  src={backgroundUrl}
-                  alt="Base photograph"
-                  className="block h-full w-auto max-w-full object-contain select-none"
-                  style={{
-                    objectPosition: "top left",
-                    boxShadow: "0 6px 28px rgba(0,0,0,.55)",
-                  }}
-                  onLoad={() => setTimeout(syncLayout, 50)}
-                  draggable={false}
-                />
-              )}
+              {/* Zoomable + pannable container */}
+              <div
+                ref={wrapRef}
+                className="relative h-full"
+                style={{
+                  transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                  transformOrigin: "top left",
+                  transition: isPanning ? "none" : "transform 0.2s ease",
+                }}
+              >
+                {/* Base photograph */}
+                {showBackground && backgroundUrl && (
+                  <img
+                    ref={imgRef}
+                    src={backgroundUrl}
+                    alt="Base photograph"
+                    className="block h-full w-auto max-w-full object-contain select-none"
+                    style={{
+                      objectPosition: "top left",
+                      boxShadow: "0 6px 28px rgba(0,0,0,.55)",
+                    }}
+                    onLoad={() => setTimeout(syncLayout, 50)}
+                    draggable={false}
+                  />
+                )}
 
-              {/* Fallback: base overlay as background when photo is hidden */}
-              {!showBackground && baseOverlayUrl && (
-                <img
-                  ref={imgRef}
-                  src={baseOverlayUrl}
-                  alt="Line drawing"
-                  className="block h-full w-auto max-w-full object-contain select-none"
-                  style={{ objectPosition: "top left" }}
-                  onLoad={() => setTimeout(syncLayout, 50)}
-                  draggable={false}
-                />
-              )}
+                {/* Fallback: line drawing when photo is hidden */}
+                {!showBackground && baseOverlayUrl && (
+                  <img
+                    ref={imgRef}
+                    src={baseOverlayUrl}
+                    alt="Line drawing"
+                    className="block h-full w-auto max-w-full object-contain select-none"
+                    style={{ objectPosition: "top left" }}
+                    onLoad={() => setTimeout(syncLayout, 50)}
+                    draggable={false}
+                  />
+                )}
 
-              {/* Glyph shape overlays */}
-              {showGlyphs &&
-                imagesLoaded &&
-                record.elements.map((el) => {
-                  const url = overlayUrl(el.overlay_path);
-                  if (!url) return null;
-                  return (
-                    <img
-                      key={`glyph-${el.id}`}
-                      src={url}
-                      alt={el.label}
-                      className="absolute top-0 left-0 h-full w-auto max-w-full object-contain pointer-events-none select-none"
-                      style={{
-                        objectPosition: "top left",
-                        transition: "filter 0.2s ease, opacity 0.2s ease",
-                        ...getOverlayStyle(el.id),
-                      }}
-                      draggable={false}
-                    />
-                  );
-                })}
+                {/* Background blackout overlay — ONLY darkens bg, not glyphs */}
+                {!showBackground && !baseOverlayUrl && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: imgLayout.top,
+                      left: imgLayout.left,
+                      width: imgLayout.width,
+                      height: imgLayout.height,
+                      background: "#18140f",
+                      zIndex: 1,
+                    }}
+                  />
+                )}
 
-              {/* Inferred reconstruction overlays */}
-              {showInferred &&
-                imagesLoaded &&
-                record.elements
-                  .filter((el) => el.inferred_overlay_path)
-                  .map((el) => {
-                    const url = overlayUrl(el.inferred_overlay_path);
+                {/* Glyph shape overlays — always above bg blackout */}
+                {showGlyphs &&
+                  imagesLoaded &&
+                  record.elements.map((el) => {
+                    const url = overlayUrl(el.overlay_path);
                     if (!url) return null;
-                    const isHovered = hoveredEl === el.id;
-                    const isLocked = lockedEls.includes(el.id);
                     return (
                       <img
-                        key={`inf-${el.id}`}
+                        key={`glyph-${el.id}`}
                         src={url}
-                        alt={`${el.label} (inferred)`}
-                        className="absolute top-0 left-0 h-full w-auto max-w-full object-contain pointer-events-none select-none"
+                        alt={el.label}
                         style={{
+                          position: "absolute",
+                          top: imgLayout.top,
+                          left: imgLayout.left,
+                          width: imgLayout.width,
+                          height: imgLayout.height,
+                          objectFit: "contain",
                           objectPosition: "top left",
-                          opacity: isLocked ? 0.7 : isHovered ? 0.55 : 0.4,
-                          filter:
-                            isLocked || isHovered
-                              ? "drop-shadow(0 0 6px rgba(126,168,190,0.5)) hue-rotate(10deg)"
-                              : "hue-rotate(10deg)",
-                          transition: "filter 0.2s ease, opacity 0.2s ease",
+                          pointerEvents: "none",
+                          userSelect: "none",
+                          zIndex: 5,
+                          transition: "filter 0.15s ease",
+                          ...getOverlayFilter(el.id),
                         }}
                         draggable={false}
                       />
                     );
                   })}
 
-              {/* Element label overlay */}
-              {showGlyphs && (hoveredEl || lockedEls.length > 0) && (
-                <div className="absolute top-2 left-2 z-30 flex flex-wrap gap-1">
-                  {visibleEls.map((elId) => {
-                    const el = record.elements.find((e) => e.id === elId);
-                    if (!el) return null;
-                    const isLocked = lockedEls.includes(elId);
-                    return (
-                      <span
-                        key={elId}
-                        className="font-mono text-[0.6rem] tracking-wider font-semibold px-1.5 py-0.5 rounded"
-                        style={{
-                          color: isLocked ? "#e8d49a" : "#c8a96e",
-                          background: "rgba(0,0,0,0.6)",
-                          textShadow: isLocked
-                            ? "0 0 8px rgba(200,169,110,0.5)"
-                            : "none",
-                        }}
-                      >
-                        {el.label}
-                        {el.inferred_overlay_path && showInferred && (
-                          <span style={{ color: "#7ea8be", marginLeft: 4 }}>
-                            +inf
-                          </span>
-                        )}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
+                {/* Inferred reconstruction overlays — full opacity, green glow */}
+                {showInferred &&
+                  imagesLoaded &&
+                  record.elements
+                    .filter((el) => el.inferred_overlay_path)
+                    .map((el) => {
+                      const url = overlayUrl(el.inferred_overlay_path);
+                      if (!url) return null;
+                      return (
+                        <img
+                          key={`inf-${el.id}`}
+                          src={url}
+                          alt={`${el.label} (inferred)`}
+                          style={{
+                            position: "absolute",
+                            top: imgLayout.top,
+                            left: imgLayout.left,
+                            width: imgLayout.width,
+                            height: imgLayout.height,
+                            objectFit: "contain",
+                            objectPosition: "top left",
+                            pointerEvents: "none",
+                            userSelect: "none",
+                            zIndex: 6,
+                            transition: "filter 0.15s ease",
+                            ...getInferredFilter(el.id),
+                          }}
+                          draggable={false}
+                        />
+                      );
+                    })}
+
+                {/* Invisible hotspot zones — rectangular bounding boxes */}
+                {showGlyphs &&
+                  imagesLoaded &&
+                  bboxes.map((box) => (
+                    <div
+                      key={`hs-${box.id}`}
+                      style={{
+                        position: "absolute",
+                        left: imgLayout.left + box.left * imgLayout.width,
+                        top: imgLayout.top + box.top * imgLayout.height,
+                        width: box.width * imgLayout.width,
+                        height: box.height * imgLayout.height,
+                        cursor: "pointer",
+                        zIndex: 20,
+                        background: "transparent",
+                        minWidth: 44,
+                        minHeight: 44,
+                      }}
+                      onMouseEnter={() => {
+                        if (isMobile || lockedEls.length > 0 && !multiSelect) return;
+                        if (lockedEls.length > 0) return;
+                        setHoveredEl(box.id);
+                      }}
+                      onMouseLeave={() => {
+                        if (isMobile) return;
+                        if (lockedEls.length === 0) setHoveredEl(null);
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleClickElement(box.id);
+                      }}
+                      onTouchStart={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleClickElement(box.id);
+                      }}
+                    />
+                  ))}
+
+                {/* Element label overlay */}
+                {showGlyphs && (hoveredEl || lockedEls.length > 0) && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: imgLayout.top + 8,
+                      left: imgLayout.left + 8,
+                      zIndex: 30,
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 4,
+                    }}
+                  >
+                    {visibleEls.map((elId) => {
+                      const el = record.elements.find((e) => e.id === elId);
+                      if (!el) return null;
+                      const isLocked = lockedEls.includes(elId);
+                      return (
+                        <span
+                          key={elId}
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: "0.6rem",
+                            letterSpacing: "0.05em",
+                            fontWeight: 600,
+                            padding: "2px 6px",
+                            borderRadius: 3,
+                            color: isLocked ? "#e8d49a" : "#c8a96e",
+                            background: "rgba(0,0,0,0.6)",
+                            textShadow: isLocked
+                              ? "0 0 8px rgba(200,169,110,0.5)"
+                              : "none",
+                          }}
+                        >
+                          {el.label}
+                          {el.inferred_overlay_path && showInferred && (
+                            <span style={{ color: "#66ff96", marginLeft: 4 }}>
+                              +inf
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               {/* Multi-select indicator */}
               {multiSelect && (
@@ -542,7 +779,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                     <span className="font-cinzel text-[0.5rem] text-mapsa-muted/50 tracking-[0.2em] uppercase bg-black/30 px-3 py-1.5 rounded">
                       {isMobile
                         ? "Tap a glyph to select"
-                        : "Hover to preview · Click to lock · M for multi-select · Esc to clear"}
+                        : "Hover to preview · Click to lock · M for multi-select · Ctrl+Scroll to zoom"}
                     </span>
                   </div>
                 )}
@@ -553,14 +790,15 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           {isMobile && record.elements.length > 0 && (
             <div className="flex items-center gap-2 px-4 py-2 shrink-0 border-t border-mapsa-border bg-mapsa-panel-alt">
               <button
-                onClick={() => setMultiSelect((p) => !p)}
+                onMouseDown={(e) => { e.preventDefault(); setMultiSelect((p) => !p); }}
                 className={`mapsa-btn text-2xs ${multiSelect ? "mapsa-btn-active" : ""}`}
               >
                 {multiSelect ? "✓ Grouping" : "Group Select"}
               </button>
               {lockedEls.length > 0 && (
                 <button
-                  onClick={() => {
+                  onMouseDown={(e) => {
+                    e.preventDefault();
                     setLockedEls([]);
                     setMultiSelect(false);
                   }}
@@ -591,13 +829,13 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           <div className="shrink-0 border-t border-mapsa-border bg-mapsa-panel-alt px-4 py-3 min-h-[120px]">
             {selectedElementData.length === 0 ? (
               <p className="font-garamond text-sm text-mapsa-muted/50 italic">
-                Select a glyph to view primary sources & citations.
+                Select a glyph to view primary sources &amp; citations.
               </p>
             ) : (
               <div>
                 <div className="flex items-baseline gap-2 mb-2 flex-wrap">
                   <span className="mapsa-label text-[0.5rem]">
-                    Primary Sources & Citations
+                    Primary Sources &amp; Citations
                   </span>
                   <span className="font-cinzel text-sm text-mapsa-gold-light font-semibold">
                     {selectedElementData.map((el) => el.label).join(" + ")}
@@ -625,7 +863,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                           ` · ${ann.contributor_affiliation}`}{" "}
                         · {ann.created_at?.split("T")[0]}
                       </p>
-                      <p className="font-garamond text-xs text-mapsa-text italic leading-snug">
+                      <p className="font-garamond text-xs text-mapsa-muted italic leading-snug">
                         {ann.type}
                       </p>
                       <p className="font-garamond text-xs text-mapsa-muted leading-relaxed line-clamp-2">

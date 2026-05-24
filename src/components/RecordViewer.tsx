@@ -19,10 +19,7 @@ interface RecordViewerProps {
 
 interface ElementBBox {
   id: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
+  left: number; top: number; width: number; height: number;
 }
 
 function computeBBox(
@@ -36,10 +33,11 @@ function computeBBox(
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
   let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
   let found = false;
-  const step = Math.max(1, Math.floor(canvas.width / 600));
+  // Fine-grained sampling for accuracy
+  const step = Math.max(1, Math.floor(canvas.width / 800));
   for (let y = 0; y < canvas.height; y += step) {
     for (let x = 0; x < canvas.width; x += step) {
-      if (data[(y * canvas.width + x) * 4 + 3] > 10) {
+      if (data[(y * canvas.width + x) * 4 + 3] > 5) {
         if (x < minX) minX = x; if (x > maxX) maxX = x;
         if (y < minY) minY = y; if (y > maxY) maxY = y;
         found = true;
@@ -47,8 +45,8 @@ function computeBBox(
     }
   }
   if (!found) return null;
-  const padX = canvas.width * 0.015;
-  const padY = canvas.height * 0.015;
+  const padX = canvas.width * 0.018;
+  const padY = canvas.height * 0.018;
   return {
     id,
     left: Math.max(0, minX - padX) / canvas.width,
@@ -96,27 +94,31 @@ function applyInferredGlow(el: HTMLElement, intensity: number, isLocked: boolean
 
 function clearGlow(el: HTMLElement) { el.style.filter = ''; }
 
-const HIGH_Z_ELEMENTS = ['E22'];
-
-type ActiveLayer = 'background' | 'glyphs' | 'inferred' | 'none';
+const HIGH_Z_LABELS = ['E22'];
 
 export default function RecordViewer({ record }: RecordViewerProps) {
   const { profile } = useAuth();
   const wrapRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
+  // Direct DOM refs for overlays
   const ovRefsMap = useRef<Map<string, HTMLImageElement>>(new Map());
   const infRefsMap = useRef<Map<string, HTMLImageElement>>(new Map());
   const animRef = useRef<number | null>(null);
   const phaseRef = useRef(0);
   const hoveredRef = useRef<string | null>(null);
   const lockedRef = useRef<string[]>([]);
+  // Track which sub-layers are hidden per element (for relief/inferred deselection)
+  const hiddenSubsRef = useRef<Set<string>>(new Set()); // "E27-relief" or "E27-inferred"
 
-  // Single active layer — mutually exclusive
-  const [activeLayer, setActiveLayer] = useState<ActiveLayer>('background');
+  // Independent layer toggles
+  const [bgOn, setBgOn] = useState(false);
+  const [glyphsOn, setGlyphsOn] = useState(false);
+  const [inferredOn, setInferredOn] = useState(false);
 
   const [lockedEls, _setLockedEls] = useState<string[]>([]);
   const [hoveredEl, _setHoveredEl] = useState<string | null>(null);
+  const [hiddenSubs, setHiddenSubs] = useState<Set<string>>(new Set());
   const [multiSelect, setMultiSelect] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(record.annotations);
@@ -132,20 +134,11 @@ export default function RecordViewer({ record }: RecordViewerProps) {
 
   const inferredEls = record.elements.filter((el) => el.inferred_overlay_path);
 
-  // Derived booleans from activeLayer
-  const showBackground = activeLayer === 'background';
-  const showGlyphs = activeLayer === 'glyphs';
-  const showInferred = activeLayer === 'inferred';
-
-  function toggleLayer(layer: ActiveLayer) {
-    setActiveLayer((prev) => prev === layer ? 'none' : layer);
-  }
-
   function setLockedEls(val: string[] | ((prev: string[]) => string[])) {
     _setLockedEls((prev) => {
       const next = typeof val === 'function' ? val(prev) : val;
       lockedRef.current = next;
-      updateOverlayVisibility(hoveredRef.current, next);
+      syncOverlays();
       return next;
     });
   }
@@ -153,52 +146,87 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   function setHoveredEl(val: string | null) {
     hoveredRef.current = val;
     _setHoveredEl(val);
-    updateOverlayVisibility(val, lockedRef.current);
+    syncOverlays();
   }
 
-  function updateOverlayVisibility(hovered: string | null, locked: string[]) {
+  // Toggle sub-layer visibility for split elements
+  function toggleSub(key: string) {
+    setHiddenSubs((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      hiddenSubsRef.current = next;
+      syncOverlays();
+      return next;
+    });
+  }
+
+  // ── Core overlay visibility logic ──
+  function syncOverlays() {
+    const hovered = hoveredRef.current;
+    const locked = lockedRef.current;
+    const hidden = hiddenSubsRef.current;
+
+    // Which elements are "active" (hovered or locked)
     const activeIds = new Set(locked);
     if (hovered) activeIds.add(hovered);
 
-    // Relief overlays: show when glyphs layer active and element is hovered/locked
+    // Relief overlays
     ovRefsMap.current.forEach((img, id) => {
-      if (showGlyphs && activeIds.has(id)) {
-        img.style.opacity = '1';
+      const el = record.elements.find((e) => e.id === id);
+      const label = el?.label || '';
+      const subKey = `${label}-relief`;
+      const isSubHidden = hidden.has(subKey);
+
+      // Visible if: glyphsOn (show all) OR element is active
+      const shouldShow = !isSubHidden && (glyphsOn || activeIds.has(id));
+      // Glow if: element is active (not just because glyphsOn)
+      const shouldGlow = activeIds.has(id) && !isSubHidden;
+
+      if (shouldShow) {
         img.style.display = 'block';
+        img.style.opacity = '1';
+        if (!shouldGlow) clearGlow(img); // visible but no glow
       } else {
-        img.style.opacity = '0';
-        img.style.filter = '';
         img.style.display = 'none';
+        img.style.opacity = '0';
+        clearGlow(img);
       }
     });
 
-    // Inferred overlays: show ALL when inferred layer active, or show individual when glyphs active + element selected
+    // Inferred overlays
     infRefsMap.current.forEach((img, id) => {
-      if (showInferred) {
-        img.style.opacity = '1';
+      const el = record.elements.find((e) => e.id === id);
+      const label = el?.label || '';
+      const subKey = `${label}-inferred`;
+      const isSubHidden = hidden.has(subKey);
+
+      const shouldShow = !isSubHidden && (inferredOn || activeIds.has(id));
+      const shouldGlow = (activeIds.has(id) || inferredOn) && !isSubHidden;
+
+      if (shouldShow) {
         img.style.display = 'block';
-      } else if (showGlyphs && activeIds.has(id)) {
         img.style.opacity = '1';
-        img.style.display = 'block';
+        if (!shouldGlow) clearGlow(img);
       } else {
-        img.style.opacity = '0';
-        img.style.filter = '';
         img.style.display = 'none';
+        img.style.opacity = '0';
+        clearGlow(img);
       }
     });
 
-    if ((showGlyphs && activeIds.size > 0) || showInferred) startAnim();
-    else stopAnim();
+    // Animation
+    const needsAnim = activeIds.size > 0 || inferredOn;
+    if (needsAnim) startAnim(); else stopAnim();
   }
 
-  // Re-run visibility when layer changes
-  useEffect(() => {
-    updateOverlayVisibility(hoveredRef.current, lockedRef.current);
-  }, [activeLayer]);
+  // Re-sync when toggles change
+  useEffect(() => { syncOverlays(); }, [glyphsOn, inferredOn, bgOn]);
 
+  // ── Glow animation ──
   function tick() {
     const hovered = hoveredRef.current;
     const locked = lockedRef.current;
+    const hidden = hiddenSubsRef.current;
     const activeIds = new Set(locked);
     if (hovered) activeIds.add(hovered);
     const isLocked = locked.length > 0;
@@ -206,22 +234,32 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     phaseRef.current += 0.025;
     const intensity = 0.5 + 0.5 * Math.sin(phaseRef.current);
 
-    if (showGlyphs) {
-      activeIds.forEach((id) => {
-        const ov = ovRefsMap.current.get(id);
-        if (ov && ov.style.display !== 'none') applyGlow(ov, intensity, isLocked);
-        const inf = infRefsMap.current.get(id);
-        if (inf && inf.style.display !== 'none') applyInferredGlow(inf, intensity, isLocked);
+    // Glow active relief overlays
+    activeIds.forEach((id) => {
+      const el = record.elements.find((e) => e.id === id);
+      const label = el?.label || '';
+      const ov = ovRefsMap.current.get(id);
+      if (ov && ov.style.display !== 'none' && !hidden.has(`${label}-relief`)) {
+        applyGlow(ov, intensity, isLocked);
+      }
+      const inf = infRefsMap.current.get(id);
+      if (inf && inf.style.display !== 'none' && !hidden.has(`${label}-inferred`)) {
+        applyInferredGlow(inf, intensity, isLocked);
+      }
+    });
+
+    // Glow all inferred when inferredOn
+    if (inferredOn) {
+      infRefsMap.current.forEach((img, id) => {
+        const el = record.elements.find((e) => e.id === id);
+        const label = el?.label || '';
+        if (img.style.display !== 'none' && !hidden.has(`${label}-inferred`) && !activeIds.has(id)) {
+          applyInferredGlow(img, intensity, true);
+        }
       });
     }
 
-    if (showInferred) {
-      infRefsMap.current.forEach((img) => {
-        if (img.style.display !== 'none') applyInferredGlow(img, intensity, true);
-      });
-    }
-
-    if ((showGlyphs && activeIds.size > 0) || showInferred) {
+    if (activeIds.size > 0 || inferredOn) {
       animRef.current = requestAnimationFrame(tick);
     } else {
       animRef.current = null;
@@ -241,35 +279,63 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  // Preload overlays + compute bboxes
+  // Preload + bbox
   useEffect(() => {
-    const els = record.elements.filter((el) => el.overlay_path);
-    if (els.length === 0) { setImagesLoaded(true); return; }
+    const allOverlayEls = record.elements.filter((el) => el.overlay_path || el.inferred_overlay_path);
+    // Compute bboxes from relief overlays (or inferred if no relief)
+    const bboxEls = record.elements.filter((el) => el.overlay_path);
+    if (bboxEls.length === 0) { setImagesLoaded(true); return; }
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     const boxes: ElementBBox[] = [];
     let loaded = 0;
-    els.forEach((el) => {
+
+    // Also try inferred for elements whose relief bbox fails
+    const fallbackNeeded = new Set<string>();
+
+    bboxEls.forEach((el) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         const box = computeBBox(img, el.id, canvas, ctx);
-        if (box) {
-          boxes.push(box);
-        } else {
-          console.warn(`No visible pixels in overlay for ${el.label} — bbox skipped`);
+        if (box) boxes.push(box);
+        else {
+          console.warn(`bbox failed for ${el.label} (relief) — will try inferred`);
+          fallbackNeeded.add(el.id);
         }
         loaded++;
-        if (loaded === els.length) { setBboxes(boxes); setImagesLoaded(true); }
+        if (loaded === bboxEls.length) finalize();
       };
       img.onerror = () => {
-        console.warn(`Failed to load overlay for ${el.label}: ${el.overlay_path}`);
+        console.warn(`Load failed for ${el.label}: ${el.overlay_path}`);
+        fallbackNeeded.add(el.id);
         loaded++;
-        if (loaded === els.length) { setBboxes(boxes); setImagesLoaded(true); }
+        if (loaded === bboxEls.length) finalize();
       };
       img.src = overlayUrl(el.overlay_path) || '';
     });
+
+    function finalize() {
+      // Try inferred overlays for any that failed
+      const fallbackEls = record.elements.filter((el) => fallbackNeeded.has(el.id) && el.inferred_overlay_path);
+      if (fallbackEls.length === 0) { setBboxes(boxes); setImagesLoaded(true); return; }
+      let fbLoaded = 0;
+      fallbackEls.forEach((el) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const box = computeBBox(img, el.id, canvas, ctx);
+          if (box) { boxes.push(box); console.log(`bbox recovered for ${el.label} via inferred`); }
+          else console.warn(`bbox STILL failed for ${el.label}`);
+          fbLoaded++;
+          if (fbLoaded === fallbackEls.length) { setBboxes(boxes); setImagesLoaded(true); }
+        };
+        img.onerror = () => { fbLoaded++; if (fbLoaded === fallbackEls.length) { setBboxes(boxes); setImagesLoaded(true); } };
+        img.src = overlayUrl(el.inferred_overlay_path) || '';
+      });
+    }
+
     return () => { stopAnim(); };
   }, [record.elements]);
 
@@ -290,7 +356,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     const t = setTimeout(syncLayout, 300);
     window.addEventListener('resize', syncLayout);
     return () => { clearTimeout(t); window.removeEventListener('resize', syncLayout); };
-  }, [syncLayout, activeLayer, imagesLoaded]);
+  }, [syncLayout, imagesLoaded]);
 
   function handleZoom(delta: number) { setZoom((prev) => Math.max(1, Math.min(6, prev + delta))); }
   function resetZoom() { setZoom(1); setPan({ x: 0, y: 0 }); }
@@ -315,24 +381,29 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   );
 
   function handleClickElement(id: string) {
-    if (multiSelect) setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-    else setLockedEls((prev) => prev.length === 1 && prev[0] === id ? [] : [id]);
+    if (multiSelect) {
+      setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    } else {
+      // Single click: toggle — click to select, click again to deselect
+      setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [id]);
+    }
+    // Clear sub-layer hiding when selecting new element
+    setHiddenSubs(new Set());
+    hiddenSubsRef.current = new Set();
   }
+
   function handleSelectGrouping(g: GroupingHypothesis) { setLockedEls(g.element_ids); setMultiSelect(false); }
   function handleSelectElement(el: CandidateElement) { setLockedEls([el.id]); setMultiSelect(false); }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { setLockedEls([]); setMultiSelect(false); setActiveLayer('background'); resetZoom(); }
+      if (e.key === 'Escape') { setLockedEls([]); setMultiSelect(false); resetZoom(); setHiddenSubs(new Set()); hiddenSubsRef.current = new Set(); }
       if (e.key === 'm' || e.key === 'M') setMultiSelect((p) => !p);
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navElement(1); }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); navElement(-1); }
       if (e.key === '+' || e.key === '=') handleZoom(0.5);
       if (e.key === '-') handleZoom(-0.5);
       if (e.key === '0') resetZoom();
-      if (e.key === '1') setActiveLayer('background');
-      if (e.key === '2') setActiveLayer('glyphs');
-      if (e.key === '3') setActiveLayer('inferred');
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -367,10 +438,10 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const baseOverlayUrl = overlayUrl(record.base_overlay_path);
 
   const sortedBboxes = [...bboxes].sort((a, b) => {
-    const aHigh = HIGH_Z_ELEMENTS.includes(record.elements.find((e) => e.id === a.id)?.label || '');
-    const bHigh = HIGH_Z_ELEMENTS.includes(record.elements.find((e) => e.id === b.id)?.label || '');
-    if (aHigh && !bHigh) return 1;
-    if (!aHigh && bHigh) return -1;
+    const aLabel = record.elements.find((e) => e.id === a.id)?.label || '';
+    const bLabel = record.elements.find((e) => e.id === b.id)?.label || '';
+    if (HIGH_Z_LABELS.includes(aLabel) && !HIGH_Z_LABELS.includes(bLabel)) return 1;
+    if (!HIGH_Z_LABELS.includes(aLabel) && HIGH_Z_LABELS.includes(bLabel)) return -1;
     return 0;
   });
 
@@ -385,26 +456,17 @@ export default function RecordViewer({ record }: RecordViewerProps) {
 
       <div className="flex flex-col lg:flex-row" style={{ minHeight: 'calc(100vh - 120px)' }}>
         <div className="flex-1 min-w-[320px] flex flex-col border-r border-mapsa-border overflow-hidden">
-          {/* Layer radio buttons + zoom */}
+          {/* Independent toggle buttons */}
           <div className="flex gap-2 flex-wrap px-4 pt-3 pb-2 shrink-0 border-b border-mapsa-border/40 items-center">
             <span className="mapsa-label self-center mr-1">Layers</span>
-            <button
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleLayer('background'); }}
-              className={`mapsa-btn text-2xs ${showBackground ? 'mapsa-btn-active' : ''}`}
-            >Background</button>
-            <button
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleLayer('glyphs'); }}
-              className={`mapsa-btn text-2xs ${showGlyphs ? 'mapsa-btn-active' : ''}`}
-            >Glyph Shapes</button>
-            <button
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggleLayer('inferred'); }}
-              className={`mapsa-btn text-2xs ${showInferred ? 'mapsa-btn-active' : ''}`}
-              style={{
-                borderColor: showInferred ? '#7ea8be' : undefined,
-                background: showInferred ? '#7ea8be' : undefined,
-                color: showInferred ? '#18140f' : undefined,
-              }}
-            >Inferred</button>
+            <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setBgOn((p) => !p); }}
+              className={`mapsa-btn text-2xs ${bgOn ? 'mapsa-btn-active' : ''}`}>Background</button>
+            <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setGlyphsOn((p) => !p); }}
+              className={`mapsa-btn text-2xs ${glyphsOn ? 'mapsa-btn-active' : ''}`}>Glyph Shapes</button>
+            <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setInferredOn((p) => !p); }}
+              className={`mapsa-btn text-2xs ${inferredOn ? 'mapsa-btn-active' : ''}`}
+              style={{ borderColor: inferredOn ? '#7ea8be' : undefined, background: inferredOn ? '#7ea8be' : undefined, color: inferredOn ? '#18140f' : undefined }}>
+              Inferred</button>
             <div className="ml-auto flex items-center gap-1.5">
               <button onMouseDown={(e) => { e.preventDefault(); handleZoom(-0.5); }} className="mapsa-btn text-2xs px-2">−</button>
               <span className="mapsa-mono text-[0.56rem] w-[3em] text-center">{Math.round(zoom * 100)}%</span>
@@ -413,7 +475,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
             </div>
           </div>
 
-          {/* Image area */}
           <div className="flex-1 min-h-0 px-4 pb-2">
             <div
               className="relative h-full overflow-hidden rounded-md border border-mapsa-border"
@@ -428,19 +489,16 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                 transformOrigin: 'top left',
                 transition: isPanning ? 'none' : 'transform 0.2s ease',
               }}>
-                {/* Base photograph — ALWAYS rendered for layout reference */}
+                {/* Base photo — always rendered */}
                 {backgroundUrl && (
                   <img ref={imgRef} src={backgroundUrl} alt="Base photograph"
                     className="block h-full w-auto max-w-full object-contain select-none"
-                    style={{
-                      objectPosition: 'top left',
-                      boxShadow: '0 6px 28px rgba(0,0,0,.55)',
-                    }}
+                    style={{ objectPosition: 'top left', boxShadow: '0 6px 28px rgba(0,0,0,.55)' }}
                     onLoad={() => setTimeout(syncLayout, 50)} draggable={false} />
                 )}
 
-                {/* Background overlay (line drawing with cutout) — sits ON TOP of base photo */}
-                {showBackground && baseOverlayUrl && (
+                {/* Background overlay (line drawing with cutout) — on top of photo */}
+                {bgOn && baseOverlayUrl && (
                   <img src={baseOverlayUrl} alt="Background overlay"
                     style={{
                       position: 'absolute',
@@ -451,11 +509,11 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                     }} draggable={false} />
                 )}
 
-                {/* Glyph overlays — hidden by default */}
+                {/* Relief overlays */}
                 {record.elements.map((el) => {
                   const url = overlayUrl(el.overlay_path);
                   if (!url) return null;
-                  const isHighZ = HIGH_Z_ELEMENTS.includes(el.label);
+                  const isHighZ = HIGH_Z_LABELS.includes(el.label);
                   return (
                     <img key={`ov-${el.id}`}
                       ref={(node) => { if (node) ovRefsMap.current.set(el.id, node); }}
@@ -472,7 +530,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                   );
                 })}
 
-                {/* Inferred overlays — hidden by default */}
+                {/* Inferred overlays */}
                 {inferredEls.map((el) => {
                   const url = overlayUrl(el.inferred_overlay_path);
                   if (!url) return null;
@@ -491,10 +549,10 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                   );
                 })}
 
-                {/* Hotspot zones — active when glyphs or inferred layer is on */}
-                {(showGlyphs || showInferred) && imagesLoaded && sortedBboxes.map((box) => {
+                {/* Hotspot zones — always active for hover/click */}
+                {imagesLoaded && sortedBboxes.map((box) => {
                   const el = record.elements.find((e) => e.id === box.id);
-                  const isHighZ = el && HIGH_Z_ELEMENTS.includes(el.label);
+                  const isHighZ = el && HIGH_Z_LABELS.includes(el.label);
                   return (
                     <div key={`hs-${box.id}`} style={{
                       position: 'absolute',
@@ -514,7 +572,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                 })}
 
                 {/* Labels */}
-                {(showGlyphs || showInferred) && (hoveredEl || lockedEls.length > 0) && (
+                {(hoveredEl || lockedEls.length > 0) && (
                   <div style={{ position: 'absolute', top: imgLayout.top + 8, left: imgLayout.left + 8, zIndex: 30, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                     {visibleEls.map((elId) => {
                       const el = record.elements.find((e) => e.id === elId);
@@ -539,16 +597,14 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               {multiSelect && (
                 <div className="absolute top-2 right-2 z-30">
                   <span className="font-mono text-[0.56rem] text-mapsa-gold bg-black/70 px-2.5 py-1 rounded border border-mapsa-gold/40">
-                    {isMobile ? 'GROUP SELECT · Tap elements' : 'GROUP SELECT · Click elements · Press M to exit'}
-                  </span>
+                    {isMobile ? 'GROUP SELECT · Tap elements' : 'GROUP SELECT · Click elements · Press M to exit'}</span>
                 </div>
               )}
 
-              {!lockedEls.length && !hoveredEl && record.elements.length > 0 && (showGlyphs || showInferred) && (
+              {!lockedEls.length && !hoveredEl && record.elements.length > 0 && (
                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
                   <span className="font-cinzel text-[0.5rem] text-mapsa-muted/50 tracking-[0.2em] uppercase bg-black/30 px-3 py-1.5 rounded">
-                    {isMobile ? 'Tap a glyph to select' : 'Hover to preview · Click to lock · Ctrl+Scroll to zoom'}
-                  </span>
+                    {isMobile ? 'Tap a glyph to select' : 'Hover to preview · Click to lock · Ctrl+Scroll to zoom'}</span>
                 </div>
               )}
             </div>
@@ -563,8 +619,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                 <button onMouseDown={(e) => { e.preventDefault(); setLockedEls([]); setMultiSelect(false); }} className="mapsa-btn text-2xs">
                   Clear ({lockedEls.length})</button>
               )}
-              <span className="font-mono text-[0.56rem] text-mapsa-muted/60 ml-auto">
-                {lockedEls.length ? `${lockedEls.length} selected` : `${record.elements.length} glyphs`}</span>
             </div>
           )}
 
@@ -613,6 +667,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           lockedEls={lockedEls}
           matchingGroupings={matchingGroupings}
           multiSelect={multiSelect}
+          hiddenSubs={hiddenSubs}
+          onToggleSub={toggleSub}
           onToggleMultiSelect={() => setMultiSelect((prev) => !prev)}
           onSelectElement={handleSelectElement}
           onSelectGrouping={handleSelectGrouping}

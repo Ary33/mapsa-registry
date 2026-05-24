@@ -24,6 +24,8 @@ interface GlyphSidebarProps {
   lockedEls: string[];
   matchingGroupings: GroupingHypothesis[];
   multiSelect: boolean;
+  hiddenSubs: Set<string>;
+  onToggleSub: (key: string) => void;
   onToggleMultiSelect: () => void;
   onSelectElement: (el: CandidateElement) => void;
   onSelectGrouping: (g: GroupingHypothesis) => void;
@@ -44,7 +46,7 @@ const RELATIONSHIP_OPTIONS = [
 
 export default function GlyphSidebar({
   record, annotations, selectedElements, lockedEls, matchingGroupings,
-  multiSelect, onToggleMultiSelect, onSelectElement, onSelectGrouping,
+  multiSelect, hiddenSubs, onToggleSub, onToggleMultiSelect, onSelectElement, onSelectGrouping,
   onSubmitAnnotation, onAddGrouping,
 }: GlyphSidebarProps) {
   const { profile } = useAuth();
@@ -292,6 +294,21 @@ export default function GlyphSidebar({
                         <span className="mapsa-tag" style={{ borderColor: '#7ea8be', color: '#7ea8be' }}>has inferred reconstruction</span>
                       )}
                     </div>
+                    {/* Sub-layer toggles for split elements */}
+                    {singleEl.inferred_overlay_path && lockedEls.includes(singleEl.id) && (
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onMouseDown={(e) => { e.preventDefault(); onToggleSub(`${singleEl.label}-relief`); }}
+                          className={`mapsa-btn text-2xs ${!hiddenSubs.has(`${singleEl.label}-relief`) ? 'mapsa-btn-active' : ''}`}
+                          style={{ borderColor: '#c8a96e' }}
+                        >Relief {!hiddenSubs.has(`${singleEl.label}-relief`) ? '✓' : '✗'}</button>
+                        <button
+                          onMouseDown={(e) => { e.preventDefault(); onToggleSub(`${singleEl.label}-inferred`); }}
+                          className={`mapsa-btn text-2xs ${!hiddenSubs.has(`${singleEl.label}-inferred`) ? 'mapsa-btn-active' : ''}`}
+                          style={{ borderColor: '#7ea8be' }}
+                        >Inferred {!hiddenSubs.has(`${singleEl.label}-inferred`) ? '✓' : '✗'}</button>
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -320,12 +320,14 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       // Try inferred overlays for any that failed
       const fallbackEls = record.elements.filter((el) => fallbackNeeded.has(el.id) && el.inferred_overlay_path);
       if (fallbackEls.length === 0) { setBboxes(boxes); setImagesLoaded(true); return; }
+      if (!ctx) { setBboxes(boxes); setImagesLoaded(true); return; }
+      const fbCtx = ctx;
       let fbLoaded = 0;
       fallbackEls.forEach((el) => {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
-          const box = computeBBox(img, el.id, canvas, ctx);
+          const box = computeBBox(img, el.id, canvas, fbCtx);
           if (box) { boxes.push(box); console.log(`bbox recovered for ${el.label} via inferred`); }
           else console.warn(`bbox STILL failed for ${el.label}`);
           fbLoaded++;

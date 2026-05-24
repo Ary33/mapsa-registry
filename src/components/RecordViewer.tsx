@@ -34,10 +34,10 @@ function computeBBox(
   let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
   let found = false;
   // Fine-grained sampling for accuracy
-  const step = Math.max(1, Math.floor(canvas.width / 800));
+  const step = Math.max(1, Math.floor(canvas.width / 1000));
   for (let y = 0; y < canvas.height; y += step) {
     for (let x = 0; x < canvas.width; x += step) {
-      if (data[(y * canvas.width + x) * 4 + 3] > 5) {
+      if (data[(y * canvas.width + x) * 4 + 3] > 2) {
         if (x < minX) minX = x; if (x > maxX) maxX = x;
         if (y < minY) minY = y; if (y > maxY) maxY = y;
         found = true;
@@ -45,8 +45,8 @@ function computeBBox(
     }
   }
   if (!found) return null;
-  const padX = canvas.width * 0.018;
-  const padY = canvas.height * 0.018;
+  const padX = canvas.width * 0.025;
+  const padY = canvas.height * 0.025;
   return {
     id,
     left: Math.max(0, minX - padX) / canvas.width,
@@ -60,17 +60,14 @@ function applyGlow(el: HTMLElement, intensity: number, isLocked: boolean) {
   if (isLocked) {
     el.style.filter =
       'drop-shadow(0 0 1px rgba(255,250,220,1)) ' +
-      'drop-shadow(0 0 4px rgba(255,235,160,0.95)) ' +
-      'drop-shadow(0 0 8px rgba(255,215,100,0.7)) ' +
-      'drop-shadow(0 0 14px rgba(255,195,60,0.4))';
+      'drop-shadow(0 0 2px rgba(255,235,160,0.9)) ' +
+      'drop-shadow(0 0 4px rgba(255,215,100,0.5))';
   } else {
     const a1 = (0.6 + 0.4 * intensity).toFixed(2);
-    const a2 = (0.4 + 0.5 * intensity).toFixed(2);
-    const a3 = (0.2 + 0.4 * intensity).toFixed(2);
+    const a2 = (0.35 + 0.45 * intensity).toFixed(2);
     el.style.filter =
       `drop-shadow(0 0 1px rgba(255,250,220,${a1})) ` +
-      `drop-shadow(0 0 4px rgba(255,235,160,${a2})) ` +
-      `drop-shadow(0 0 8px rgba(255,215,100,${a3}))`;
+      `drop-shadow(0 0 2px rgba(255,235,160,${a2}))`;
   }
 }
 
@@ -78,17 +75,14 @@ function applyInferredGlow(el: HTMLElement, intensity: number, isLocked: boolean
   if (isLocked) {
     el.style.filter =
       'drop-shadow(0 0 1px rgba(140,255,180,1)) ' +
-      'drop-shadow(0 0 4px rgba(110,240,155,0.95)) ' +
-      'drop-shadow(0 0 8px rgba(80,220,130,0.7)) ' +
-      'drop-shadow(0 0 14px rgba(60,200,110,0.4))';
+      'drop-shadow(0 0 2px rgba(110,240,155,0.9)) ' +
+      'drop-shadow(0 0 4px rgba(80,220,130,0.5))';
   } else {
     const a1 = (0.6 + 0.4 * intensity).toFixed(2);
-    const a2 = (0.4 + 0.5 * intensity).toFixed(2);
-    const a3 = (0.2 + 0.4 * intensity).toFixed(2);
+    const a2 = (0.35 + 0.45 * intensity).toFixed(2);
     el.style.filter =
       `drop-shadow(0 0 1px rgba(140,255,180,${a1})) ` +
-      `drop-shadow(0 0 4px rgba(110,240,155,${a2})) ` +
-      `drop-shadow(0 0 8px rgba(80,220,130,${a3}))`;
+      `drop-shadow(0 0 2px rgba(110,240,155,${a2}))`;
   }
 }
 
@@ -200,7 +194,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const subKey = `${label}-inferred`;
       const isSubHidden = hidden.has(subKey);
 
-      const shouldShow = !isSubHidden && (inferredOn || activeIds.has(id));
+      const shouldShow = !isSubHidden && (inferredOn || glyphsOn || activeIds.has(id));
       const shouldGlow = (activeIds.has(id) || inferredOn) && !isSubHidden;
 
       if (shouldShow) {

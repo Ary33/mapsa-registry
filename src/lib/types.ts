@@ -119,6 +119,13 @@ export interface BoundingBox {
   height: number;
 }
 
+export interface BBoxZone {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export interface CandidateElement {
   id: string;
   record_id: string;
@@ -134,6 +141,7 @@ export interface CandidateElement {
   overlay_path: string | null;
   inferred_overlay_path: string | null;
   sort_order: number;
+  bbox_zones: BBoxZone[];
 }
 
 export interface GroupingHypothesis {

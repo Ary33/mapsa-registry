@@ -17,45 +17,6 @@ interface RecordViewerProps {
   record: InscriptionRecord;
 }
 
-interface ElementBBox {
-  id: string;
-  left: number; top: number; width: number; height: number;
-}
-
-function computeBBox(
-  img: HTMLImageElement, id: string,
-  canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D
-): ElementBBox | null {
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0);
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-  let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
-  let found = false;
-  // Fine-grained sampling for accuracy
-  const step = Math.max(1, Math.floor(canvas.width / 1000));
-  for (let y = 0; y < canvas.height; y += step) {
-    for (let x = 0; x < canvas.width; x += step) {
-      if (data[(y * canvas.width + x) * 4 + 3] > 2) {
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        found = true;
-      }
-    }
-  }
-  if (!found) return null;
-  const padX = canvas.width * 0.025;
-  const padY = canvas.height * 0.025;
-  return {
-    id,
-    left: Math.max(0, minX - padX) / canvas.width,
-    top: Math.max(0, minY - padY) / canvas.height,
-    width: Math.min(canvas.width, maxX - minX + padX * 2) / canvas.width,
-    height: Math.min(canvas.height, maxY - minY + padY * 2) / canvas.height,
-  };
-}
-
 function applyGlow(el: HTMLElement, intensity: number, isLocked: boolean) {
   if (isLocked) {
     el.style.filter =
@@ -117,8 +78,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const [isMobile, setIsMobile] = useState(false);
   const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(record.annotations);
   const [localGroupings, setLocalGroupings] = useState<GroupingHypothesis[]>(record.groupings);
-  const [bboxes, setBboxes] = useState<ElementBBox[]>([]);
-  const [imagesLoaded, setImagesLoaded] = useState(false);
   const [imgLayout, setImgLayout] = useState({ left: 0, top: 0, width: 0, height: 0 });
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -273,67 +232,9 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  // Preload + bbox
   useEffect(() => {
-    const allOverlayEls = record.elements.filter((el) => el.overlay_path || el.inferred_overlay_path);
-    // Compute bboxes from relief overlays (or inferred if no relief)
-    const bboxEls = record.elements.filter((el) => el.overlay_path);
-    if (bboxEls.length === 0) { setImagesLoaded(true); return; }
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-    const boxes: ElementBBox[] = [];
-    let loaded = 0;
-
-    // Also try inferred for elements whose relief bbox fails
-    const fallbackNeeded = new Set<string>();
-
-    bboxEls.forEach((el) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const box = computeBBox(img, el.id, canvas, ctx);
-        if (box) boxes.push(box);
-        else {
-          console.warn(`bbox failed for ${el.label} (relief) — will try inferred`);
-          fallbackNeeded.add(el.id);
-        }
-        loaded++;
-        if (loaded === bboxEls.length) finalize();
-      };
-      img.onerror = () => {
-        console.warn(`Load failed for ${el.label}: ${el.overlay_path}`);
-        fallbackNeeded.add(el.id);
-        loaded++;
-        if (loaded === bboxEls.length) finalize();
-      };
-      img.src = overlayUrl(el.overlay_path) || '';
-    });
-
-    function finalize() {
-      // Try inferred overlays for any that failed
-      const fallbackEls = record.elements.filter((el) => fallbackNeeded.has(el.id) && el.inferred_overlay_path);
-      if (fallbackEls.length === 0) { setBboxes(boxes); setImagesLoaded(true); return; }
-      if (!ctx) { setBboxes(boxes); setImagesLoaded(true); return; }
-      const fbCtx = ctx;
-      let fbLoaded = 0;
-      fallbackEls.forEach((el) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => {
-          const box = computeBBox(img, el.id, canvas, fbCtx);
-          if (box) { boxes.push(box); console.log(`bbox recovered for ${el.label} via inferred`); }
-          else console.warn(`bbox STILL failed for ${el.label}`);
-          fbLoaded++;
-          if (fbLoaded === fallbackEls.length) { setBboxes(boxes); setImagesLoaded(true); }
-        };
-        img.onerror = () => { fbLoaded++; if (fbLoaded === fallbackEls.length) { setBboxes(boxes); setImagesLoaded(true); } };
-        img.src = overlayUrl(el.inferred_overlay_path) || '';
-      });
-    }
-
     return () => { stopAnim(); };
-  }, [record.elements]);
+  }, []);
 
   const syncLayout = useCallback(() => {
     if (!wrapRef.current || !imgRef.current) return;
@@ -352,7 +253,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     const t = setTimeout(syncLayout, 300);
     window.addEventListener('resize', syncLayout);
     return () => { clearTimeout(t); window.removeEventListener('resize', syncLayout); };
-  }, [syncLayout, imagesLoaded]);
+  }, [syncLayout]);
 
   function handleZoom(delta: number) { setZoom((prev) => Math.max(1, Math.min(6, prev + delta))); }
   function resetZoom() { setZoom(1); setPan({ x: 0, y: 0 }); }
@@ -433,11 +334,12 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const backgroundUrl = photoUrl(record.background_path);
   const baseOverlayUrl = overlayUrl(record.base_overlay_path);
 
-  const sortedBboxes = [...bboxes].sort((a, b) => {
-    const aLabel = record.elements.find((e) => e.id === a.id)?.label || '';
-    const bLabel = record.elements.find((e) => e.id === b.id)?.label || '';
-    if (HIGH_Z_LABELS.includes(aLabel) && !HIGH_Z_LABELS.includes(bLabel)) return 1;
-    if (!HIGH_Z_LABELS.includes(aLabel) && HIGH_Z_LABELS.includes(bLabel)) return -1;
+  // Elements sorted so HIGH_Z hotspots render last (on top)
+  const sortedElements = [...record.elements].sort((a, b) => {
+    const aHigh = HIGH_Z_LABELS.includes(a.label);
+    const bHigh = HIGH_Z_LABELS.includes(b.label);
+    if (aHigh && !bHigh) return 1;
+    if (!aHigh && bHigh) return -1;
     return 0;
   });
 
@@ -545,26 +447,27 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                   );
                 })}
 
-                {/* Hotspot zones — always active for hover/click */}
-                {imagesLoaded && sortedBboxes.map((box) => {
-                  const el = record.elements.find((e) => e.id === box.id);
-                  const isHighZ = el && HIGH_Z_LABELS.includes(el.label);
-                  return (
-                    <div key={`hs-${box.id}`} style={{
+                {/* Hotspot zones from database — multiple rects per element */}
+                {sortedElements.map((el) => {
+                  const zones = el.bbox_zones || [];
+                  if (zones.length === 0) return null;
+                  const isHighZ = HIGH_Z_LABELS.includes(el.label);
+                  return zones.map((zone, zi) => (
+                    <div key={`hs-${el.id}-${zi}`} style={{
                       position: 'absolute',
-                      left: imgLayout.left + box.left * imgLayout.width,
-                      top: imgLayout.top + box.top * imgLayout.height,
-                      width: box.width * imgLayout.width,
-                      height: box.height * imgLayout.height,
+                      left: imgLayout.left + zone.left * imgLayout.width,
+                      top: imgLayout.top + zone.top * imgLayout.height,
+                      width: zone.width * imgLayout.width,
+                      height: zone.height * imgLayout.height,
                       cursor: 'pointer', zIndex: isHighZ ? 22 : 20,
-                      background: 'transparent', minWidth: 44, minHeight: 44,
+                      background: 'transparent',
                     }}
-                      onMouseEnter={() => { if (isMobile || lockedEls.length > 0) return; setHoveredEl(box.id); }}
+                      onMouseEnter={() => { if (isMobile || lockedEls.length > 0) return; setHoveredEl(el.id); }}
                       onMouseLeave={() => { if (isMobile || lockedEls.length > 0) return; setHoveredEl(null); }}
-                      onClick={(e) => { e.stopPropagation(); handleClickElement(box.id); }}
-                      onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); handleClickElement(box.id); }}
+                      onClick={(e) => { e.stopPropagation(); handleClickElement(el.id); }}
+                      onTouchStart={(e) => { e.preventDefault(); e.stopPropagation(); handleClickElement(el.id); }}
                     />
-                  );
+                  ));
                 })}
 
                 {/* Labels */}

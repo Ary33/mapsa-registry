@@ -8,6 +8,9 @@ interface RecordPageProps {
   params: { id: string };
 }
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function RecordPage({ params }: RecordPageProps) {
   const record = await fetchRecord(params.id);
   if (!record) return notFound();

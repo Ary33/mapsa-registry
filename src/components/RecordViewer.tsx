@@ -136,29 +136,18 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     });
   }
 
-  // ── Fullscreen ──
+  // ── Fullscreen (use position:fixed instead of Fullscreen API for reliable layout) ──
   const viewerRef = useRef<HTMLDivElement>(null);
 
   function toggleFullscreen() {
-    if (!viewerRef.current) return;
-    if (!document.fullscreenElement) {
-      viewerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
-    }
+    setIsFullscreen((p) => {
+      const next = !p;
+      // Re-sync layout after transition
+      setTimeout(syncLayout, 50);
+      setTimeout(syncLayout, 200);
+      return next;
+    });
   }
-
-  useEffect(() => {
-    function onFsChange() {
-      const fs = !!document.fullscreenElement;
-      setIsFullscreen(fs);
-      // Re-sync layout after fullscreen transition
-      setTimeout(syncLayout, 100);
-      setTimeout(syncLayout, 300);
-    }
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, [syncLayout]);
 
   function syncOverlays() {
     const hovered = hoveredRef.current;
@@ -372,7 +361,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        if (isFullscreen) { document.exitFullscreen().catch(() => {}); return; }
+        if (isFullscreen) { setIsFullscreen(false); setTimeout(syncLayout, 50); return; }
         setLockedEls([]); setMultiSelect(false); resetZoom(); setHiddenSubs(new Set()); hiddenSubsRef.current = new Set();
       }
       if (e.key === 'm' || e.key === 'M') setMultiSelect((p) => !p);
@@ -434,13 +423,13 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           <div className="flex gap-2 flex-wrap px-4 pt-3 pb-2 shrink-0 border-b border-mapsa-border/40 items-center">
             <span className="mapsa-label self-center mr-1">Layers</span>
             <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setBgOn((p) => !p); }}
-              className={`mapsa-btn text-2xs ${bgOn ? 'mapsa-btn-active' : ''}`}>Background</button>
+              className={`mapsa-btn text-2xs ${bgOn ? 'mapsa-btn-active' : ''}`}>BG</button>
             <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setGlyphsOn((p) => !p); }}
-              className={`mapsa-btn text-2xs ${glyphsOn ? 'mapsa-btn-active' : ''}`}>Glyph Shapes</button>
+              className={`mapsa-btn text-2xs ${glyphsOn ? 'mapsa-btn-active' : ''}`}>Shapes</button>
             <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setInferredOn((p) => !p); }}
               className={`mapsa-btn text-2xs ${inferredOn ? 'mapsa-btn-active' : ''}`}
               style={{ borderColor: inferredOn ? '#7ea8be' : undefined, background: inferredOn ? '#7ea8be' : undefined, color: inferredOn ? '#18140f' : undefined }}>
-              Inferred</button>
+              Inf</button>
             <div className="ml-auto flex items-center gap-1.5">
               {!isMobile && (
                 <>
@@ -454,17 +443,18 @@ export default function RecordViewer({ record }: RecordViewerProps) {
             </div>
           </div>
 
-          {/* Image area */}
-          <div ref={viewerRef} className={`flex-1 min-h-0 relative ${isFullscreen ? '' : 'px-4 pb-2'}`}
-            style={isFullscreen ? { background: '#18140f', display: 'flex', alignItems: 'center', justifyContent: 'center' } : undefined}>
+          {/* Image area — viewerRef is the fullscreen target */}
+          <div ref={viewerRef} className="flex-1 min-h-0 relative"
+            style={isFullscreen ? { background: '#18140f', overflow: 'hidden', position: 'fixed', inset: 0, zIndex: 9999 } : undefined}>
             <div
               ref={containerRef}
-              className="relative overflow-hidden rounded-md border border-mapsa-border"
+              className="relative overflow-hidden"
               style={{
                 cursor: zoom > 1 ? 'grab' : 'default',
                 touchAction: 'none',
-                width: isFullscreen ? '100vw' : '100%',
-                height: isFullscreen ? '100vh' : '100%',
+                width: '100%',
+                height: '100%',
+                ...(isFullscreen ? { borderRadius: 0 } : {}),
               }}
               onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMoveContainer}
               onMouseUp={handleMouseUp}
@@ -475,6 +465,9 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                 transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
                 transformOrigin: 'center center',
                 transition: isPanning ? 'none' : 'transform 0.15s ease-out',
+                display: isFullscreen ? 'flex' : undefined,
+                alignItems: isFullscreen ? 'center' : undefined,
+                justifyContent: isFullscreen ? 'center' : undefined,
               }}>
                 {backgroundUrl && (
                   <img ref={imgRef} src={backgroundUrl} alt="Base photograph"
@@ -584,8 +577,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               {isFullscreen && (
                 <div className="absolute top-2 right-2 z-50">
                   <button
-                    onMouseDown={(e) => { e.preventDefault(); document.exitFullscreen().catch(() => {}); }}
-                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); document.exitFullscreen().catch(() => {}); }}
+                    onMouseDown={(e) => { e.preventDefault(); setIsFullscreen(false); setTimeout(syncLayout, 50); }}
+                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setIsFullscreen(false); setTimeout(syncLayout, 50); }}
                     className="mapsa-btn text-2xs shadow-lg px-3"
                     style={{ background: 'rgba(31,26,20,0.9)' }}>
                     ESC</button>

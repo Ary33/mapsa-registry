@@ -63,7 +63,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const { profile } = useAuth();
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
-  const viewerRef = useRef<HTMLDivElement>(null);
 
   const ovRefsMap = useRef<Map<string, HTMLImageElement>>(new Map());
   const infRefsMap = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -76,7 +75,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const [bgOn, setBgOn] = useState(false);
   const [glyphsOn, setGlyphsOn] = useState(false);
   const [inferredOn, setInferredOn] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [lockedEls, _setLockedEls] = useState<string[]>([]);
   const [hoveredEl, _setHoveredEl] = useState<string | null>(null);
@@ -134,10 +132,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       syncOverlays();
       return next;
     });
-  }
-
-  function toggleFullscreen() {
-    setIsFullscreen((p) => !p);
   }
 
   // ── Overlay visibility (direct DOM) ──
@@ -349,11 +343,9 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        if (isFullscreen) { setIsFullscreen(false); return; }
         setLockedEls([]); setMultiSelect(false); resetView(); setHiddenSubs(new Set()); hiddenSubsRef.current = new Set();
       }
       if (e.key === 'm' || e.key === 'M') setMultiSelect((p) => !p);
-      if (e.key === 'f' || e.key === 'F') toggleFullscreen();
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navElement(1); }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); navElement(-1); }
       if (e.key === '+' || e.key === '=') handleZoom(0.5);
@@ -362,7 +354,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [record.elements, lockedEls, hoveredEl, isFullscreen]);
+  }, [record.elements, lockedEls, hoveredEl]);
 
   function navElement(dir: number) {
     const currentId = lockedEls[lockedEls.length - 1] || hoveredEl;
@@ -434,14 +426,11 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                   {zoom > 1 && <button onMouseDown={(e) => { e.preventDefault(); resetView(); }} className="mapsa-btn text-2xs px-2">⟲</button>}
                 </>
               )}
-              <button onMouseDown={(e) => { e.preventDefault(); toggleFullscreen(); }} className="mapsa-btn text-2xs px-2" title="Fullscreen (F)">⛶</button>
             </div>
           </div>
 
           {/* Image viewer */}
-          <div ref={viewerRef}
-            className="flex-1 min-h-0 relative"
-            style={isFullscreen ? { position: 'fixed', inset: 0, zIndex: 9999, background: '#18140f' } : undefined}>
+          <div className="flex-1 min-h-0 relative">
             <div
               ref={containerRef}
               className="relative overflow-hidden"
@@ -541,16 +530,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                   </div>
                 )}
               </div>
-
-              {/* ESC button in fullscreen */}
-              {isFullscreen && (
-                <div className="absolute top-2 right-2 z-50">
-                  <button
-                    onMouseDown={(e) => { e.preventDefault(); setIsFullscreen(false); }}
-                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setIsFullscreen(false); }}
-                    className="mapsa-btn text-2xs shadow-lg px-3" style={{ background: 'rgba(31,26,20,0.9)' }}>ESC</button>
-                </div>
-              )}
 
               {/* Mobile floating controls */}
               {isMobile && (

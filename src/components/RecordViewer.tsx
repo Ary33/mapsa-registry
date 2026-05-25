@@ -52,19 +52,14 @@ function clearGlow(el: HTMLElement) { el.style.filter = ''; }
 
 const HIGH_Z_LABELS = ['E22'];
 
-// ── Hit test: check if a normalized point (0-1) is inside any bbox_zone for an element ──
-function hitTestZones(
-  elements: CandidateElement[],
-  nx: number, ny: number
-): string | null {
-  // Test HIGH_Z elements first (they're on top visually)
+function hitTestZones(elements: CandidateElement[], nx: number, ny: number): string | null {
+  // HIGH_Z first
   for (const el of elements) {
     if (!HIGH_Z_LABELS.includes(el.label)) continue;
     for (const z of (el.bbox_zones || [])) {
       if (nx >= z.left && nx <= z.left + z.width && ny >= z.top && ny <= z.top + z.height) return el.id;
     }
   }
-  // Then all others
   for (const el of elements) {
     if (HIGH_Z_LABELS.includes(el.label)) continue;
     for (const z of (el.bbox_zones || [])) {
@@ -91,28 +86,27 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const [bgOn, setBgOn] = useState(false);
   const [glyphsOn, setGlyphsOn] = useState(false);
   const [inferredOn, setInferredOn] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [lockedEls, _setLockedEls] = useState<string[]>([]);
   const [hoveredEl, _setHoveredEl] = useState<string | null>(null);
   const [hiddenSubs, setHiddenSubs] = useState<Set<string>>(new Set());
   const [multiSelect, setMultiSelect] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
   const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(record.annotations);
   const [localGroupings, setLocalGroupings] = useState<GroupingHypothesis[]>(record.groupings);
   const [imgLayout, setImgLayout] = useState({ left: 0, top: 0, width: 0, height: 0 });
 
-  // Zoom/pan state
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
-  // Pinch state — store baseline zoom and distance at pinch start
   const pinchBaseZoom = useRef(1);
   const pinchBaseDist = useRef(0);
   const touchCount = useRef(0);
   const touchMoved = useRef(false);
-  const touchStartPos = useRef({ x: 0, y: 0 });
 
   const inferredEls = record.elements.filter((el) => el.inferred_overlay_path);
 
@@ -140,6 +134,22 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       return next;
     });
   }
+
+  // ── Fullscreen ──
+  function toggleFullscreen() {
+    if (!containerRef.current) return;
+    if (!document.fullscreenElement) {
+      containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  }
+
+  useEffect(() => {
+    function onFsChange() { setIsFullscreen(!!document.fullscreenElement); }
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
 
   function syncOverlays() {
     const hovered = hoveredRef.current;
@@ -180,7 +190,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     const activeIds = new Set(locked);
     if (hovered) activeIds.add(hovered);
     const isLocked = locked.length > 0;
-
     phaseRef.current += 0.025;
     const intensity = 0.5 + 0.5 * Math.sin(phaseRef.current);
 
@@ -239,9 +248,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     return () => { clearTimeout(t); window.removeEventListener('resize', syncLayout); };
   }, [syncLayout]);
 
-  // ── Clamp pan to keep image in view ──
   function clampPan(px: number, py: number, z: number): { x: number; y: number } {
-    if (!containerRef.current || !imgRef.current) return { x: px, y: py };
+    if (!containerRef.current) return { x: px, y: py };
     const cr = containerRef.current.getBoundingClientRect();
     const maxPanX = Math.max(0, (imgLayout.width * z - cr.width) / 2);
     const maxPanY = Math.max(0, (imgLayout.height * z - cr.height) / 2);
@@ -251,74 +259,46 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     };
   }
 
-  // ── Desktop zoom ──
   function handleZoom(delta: number) { setZoom((prev) => Math.max(1, Math.min(6, prev + delta))); }
   function resetZoom() { setZoom(1); setPan({ x: 0, y: 0 }); }
-  function handleWheel(e: React.WheelEvent) {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      handleZoom(e.deltaY > 0 ? -0.3 : 0.3);
-    }
-  }
+  function handleWheel(e: React.WheelEvent) { if (e.ctrlKey || e.metaKey) { e.preventDefault(); handleZoom(e.deltaY > 0 ? -0.3 : 0.3); } }
 
-  // ── Desktop pan ──
   function handleMouseDown(e: React.MouseEvent) {
-    if (zoom > 1 && e.button === 0) {
-      setIsPanning(true);
-      panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
-    }
+    if (zoom > 1 && e.button === 0) { setIsPanning(true); panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y }; }
   }
   function handleMouseMoveContainer(e: React.MouseEvent) {
     if (isPanning) {
-      const newPan = clampPan(
-        panStart.current.panX + (e.clientX - panStart.current.x),
-        panStart.current.panY + (e.clientY - panStart.current.y),
-        zoom
-      );
-      setPan(newPan);
+      const p = clampPan(panStart.current.panX + (e.clientX - panStart.current.x), panStart.current.panY + (e.clientY - panStart.current.y), zoom);
+      setPan(p);
     }
   }
   function handleMouseUp() { setIsPanning(false); }
 
-  // ── Mobile touch handling ──
-  // All mobile tap detection happens here on the container — no hotspot divs on mobile
+  // ── Mobile touch ──
   function handleTouchStart(e: React.TouchEvent) {
     touchCount.current = e.touches.length;
     touchMoved.current = false;
-
     if (e.touches.length === 2) {
-      // Pinch start — store baseline
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       pinchBaseDist.current = Math.hypot(dx, dy);
       pinchBaseZoom.current = zoom;
-    } else if (e.touches.length === 1) {
-      touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      if (zoom > 1) {
-        setIsPanning(true);
-        panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, panX: pan.x, panY: pan.y };
-      }
+    } else if (e.touches.length === 1 && zoom > 1) {
+      setIsPanning(true);
+      panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, panX: pan.x, panY: pan.y };
     }
   }
 
   function handleTouchMove(e: React.TouchEvent) {
     touchMoved.current = true;
-
     if (e.touches.length === 2 && pinchBaseDist.current > 0) {
-      // Pinch zoom — compute from baseline, not incrementally
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const dist = Math.hypot(dx, dy);
-      const ratio = dist / pinchBaseDist.current;
-      const newZoom = Math.max(1, Math.min(6, pinchBaseZoom.current * ratio));
-      setZoom(newZoom);
+      setZoom(Math.max(1, Math.min(6, pinchBaseZoom.current * (dist / pinchBaseDist.current))));
     } else if (e.touches.length === 1 && isPanning && zoom > 1) {
-      const newPan = clampPan(
-        panStart.current.panX + (e.touches[0].clientX - panStart.current.x),
-        panStart.current.panY + (e.touches[0].clientY - panStart.current.y),
-        zoom
-      );
-      setPan(newPan);
+      const p = clampPan(panStart.current.panX + (e.touches[0].clientX - panStart.current.x), panStart.current.panY + (e.touches[0].clientY - panStart.current.y), zoom);
+      setPan(p);
     }
   }
 
@@ -326,20 +306,19 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     const wasPinch = touchCount.current >= 2;
     const wasMoved = touchMoved.current;
 
-    // Reset pinch state
     if (e.touches.length === 0) {
       pinchBaseDist.current = 0;
       setIsPanning(false);
     }
 
-    // If it was a simple tap (1 finger, didn't move), do hit detection
+    // Simple tap — use getBoundingClientRect for accurate hit detection
     if (!wasPinch && !wasMoved && e.changedTouches.length === 1) {
+      setHasInteracted(true);
       const touch = e.changedTouches[0];
       const hitId = getTouchHitElement(touch.clientX, touch.clientY);
       if (hitId) {
         handleClickElement(hitId);
       } else if (!multiSelect) {
-        // Tapped empty area — deselect
         setLockedEls([]);
       }
     }
@@ -347,26 +326,18 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     touchCount.current = e.touches.length;
   }
 
-  // ── Convert touch screen coords to normalized image coords and hit test ──
+  // ── Hit detection using the actual rendered image position ──
   function getTouchHitElement(clientX: number, clientY: number): string | null {
-    if (!containerRef.current || !imgRef.current) return null;
-    const cr = containerRef.current.getBoundingClientRect();
-
-    // Account for zoom and pan
-    // The wrapRef transform is: scale(zoom) translate(pan.x/zoom, pan.y/zoom)
-    // So a screen point maps to wrap-space as:
-    const wrapX = (clientX - cr.left - pan.x) / zoom;
-    const wrapY = (clientY - cr.top - pan.y) / zoom;
-
-    // Now convert to normalized image coords (0-1)
-    const nx = (wrapX - imgLayout.left) / imgLayout.width;
-    const ny = (wrapY - imgLayout.top) / imgLayout.height;
-
+    if (!imgRef.current) return null;
+    // Use the ACTUAL rendered bounding rect of the image (accounts for all transforms)
+    const ir = imgRef.current.getBoundingClientRect();
+    const nx = (clientX - ir.left) / ir.width;
+    const ny = (clientY - ir.top) / ir.height;
     if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
     return hitTestZones(record.elements, nx, ny);
   }
 
-  // ── Derived state ──
+  // Derived
   const visibleEls = hoveredEl && !lockedEls.includes(hoveredEl) ? [...lockedEls, hoveredEl] : lockedEls;
   const selectedElementData = record.elements.filter((el) => visibleEls.includes(el.id));
   const matchingGroupings = localGroupings.filter(
@@ -374,6 +345,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   );
 
   function handleClickElement(id: string) {
+    setHasInteracted(true);
     if (multiSelect) setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
     else setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [id]);
     setHiddenSubs(new Set());
@@ -385,8 +357,12 @@ export default function RecordViewer({ record }: RecordViewerProps) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { setLockedEls([]); setMultiSelect(false); resetZoom(); setHiddenSubs(new Set()); hiddenSubsRef.current = new Set(); }
+      if (e.key === 'Escape') {
+        if (isFullscreen) { document.exitFullscreen().catch(() => {}); return; }
+        setLockedEls([]); setMultiSelect(false); resetZoom(); setHiddenSubs(new Set()); hiddenSubsRef.current = new Set();
+      }
       if (e.key === 'm' || e.key === 'M') setMultiSelect((p) => !p);
+      if (e.key === 'f' || e.key === 'F') toggleFullscreen();
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navElement(1); }
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); navElement(-1); }
       if (e.key === '+' || e.key === '=') handleZoom(0.5);
@@ -395,7 +371,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [record.elements, lockedEls, hoveredEl]);
+  }, [record.elements, lockedEls, hoveredEl, isFullscreen]);
 
   function navElement(dir: number) {
     const currentId = lockedEls[lockedEls.length - 1] || hoveredEl;
@@ -418,20 +394,15 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     if (data) setLocalAnnotations((prev) => [{ ...data, contributor_name: profile.full_name, contributor_affiliation: profile.affiliation || undefined, contributor_orcid: profile.orcid || undefined }, ...prev]);
   }, [record.id, profile]);
 
-  const handleAddGrouping = useCallback((g: GroupingHypothesis) => {
-    setLocalGroupings((prev) => [...prev, g]);
-  }, []);
+  const handleAddGrouping = useCallback((g: GroupingHypothesis) => { setLocalGroupings((prev) => [...prev, g]); }, []);
 
   const backgroundUrl = photoUrl(record.background_path);
   const baseOverlayUrl = overlayUrl(record.base_overlay_path);
 
-  // Sort elements for desktop hotspot rendering (HIGH_Z last = on top)
   const sortedElements = [...record.elements].sort((a, b) => {
     const aHigh = HIGH_Z_LABELS.includes(a.label);
     const bHigh = HIGH_Z_LABELS.includes(b.label);
-    if (aHigh && !bHigh) return 1;
-    if (!aHigh && bHigh) return -1;
-    return 0;
+    if (aHigh && !bHigh) return 1; if (!aHigh && bHigh) return -1; return 0;
   });
 
   return (
@@ -445,7 +416,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
 
       <div className="flex flex-col lg:flex-row" style={{ minHeight: 'calc(100vh - 120px)' }}>
         <div className="flex-1 min-w-[320px] flex flex-col border-r border-mapsa-border overflow-hidden">
-          {/* Layer toggles + zoom (desktop only) */}
+          {/* Controls */}
           <div className="flex gap-2 flex-wrap px-4 pt-3 pb-2 shrink-0 border-b border-mapsa-border/40 items-center">
             <span className="mapsa-label self-center mr-1">Layers</span>
             <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setBgOn((p) => !p); }}
@@ -456,14 +427,17 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               className={`mapsa-btn text-2xs ${inferredOn ? 'mapsa-btn-active' : ''}`}
               style={{ borderColor: inferredOn ? '#7ea8be' : undefined, background: inferredOn ? '#7ea8be' : undefined, color: inferredOn ? '#18140f' : undefined }}>
               Inferred</button>
-            {!isMobile && (
-              <div className="ml-auto flex items-center gap-1.5">
-                <button onMouseDown={(e) => { e.preventDefault(); handleZoom(-0.5); }} className="mapsa-btn text-2xs px-2">−</button>
-                <span className="mapsa-mono text-[0.56rem] w-[3em] text-center">{Math.round(zoom * 100)}%</span>
-                <button onMouseDown={(e) => { e.preventDefault(); handleZoom(0.5); }} className="mapsa-btn text-2xs px-2">+</button>
-                {zoom > 1 && <button onMouseDown={(e) => { e.preventDefault(); resetZoom(); }} className="mapsa-btn text-2xs px-2">⟲</button>}
-              </div>
-            )}
+            <div className="ml-auto flex items-center gap-1.5">
+              {!isMobile && (
+                <>
+                  <button onMouseDown={(e) => { e.preventDefault(); handleZoom(-0.5); }} className="mapsa-btn text-2xs px-2">−</button>
+                  <span className="mapsa-mono text-[0.56rem] w-[3em] text-center">{Math.round(zoom * 100)}%</span>
+                  <button onMouseDown={(e) => { e.preventDefault(); handleZoom(0.5); }} className="mapsa-btn text-2xs px-2">+</button>
+                  {zoom > 1 && <button onMouseDown={(e) => { e.preventDefault(); resetZoom(); }} className="mapsa-btn text-2xs px-2">⟲</button>}
+                </>
+              )}
+              <button onMouseDown={(e) => { e.preventDefault(); toggleFullscreen(); }} className="mapsa-btn text-2xs px-2" title="Fullscreen (F)">⛶</button>
+            </div>
           </div>
 
           {/* Image area */}
@@ -471,7 +445,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
             <div
               ref={containerRef}
               className="relative h-full overflow-hidden rounded-md border border-mapsa-border"
-              style={{ cursor: zoom > 1 ? 'grab' : 'default', touchAction: 'none' }}
+              style={{ cursor: zoom > 1 ? 'grab' : 'default', touchAction: 'none', background: isFullscreen ? '#18140f' : undefined }}
               onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMoveContainer}
               onMouseUp={handleMouseUp}
               onMouseLeave={() => { handleMouseUp(); if (!isMobile && lockedEls.length === 0) setHoveredEl(null); }}
@@ -482,7 +456,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                 transformOrigin: 'center center',
                 transition: isPanning ? 'none' : 'transform 0.15s ease-out',
               }}>
-                {/* Base photo */}
                 {backgroundUrl && (
                   <img ref={imgRef} src={backgroundUrl} alt="Base photograph"
                     className="block h-full w-auto max-w-full object-contain select-none"
@@ -490,19 +463,16 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                     onLoad={() => setTimeout(syncLayout, 50)} draggable={false} />
                 )}
 
-                {/* Background overlay */}
                 {bgOn && baseOverlayUrl && (
                   <img src={baseOverlayUrl} alt="Background overlay"
                     style={{
-                      position: 'absolute',
-                      left: imgLayout.left, top: imgLayout.top,
+                      position: 'absolute', left: imgLayout.left, top: imgLayout.top,
                       width: imgLayout.width, height: imgLayout.height,
                       objectFit: 'contain', objectPosition: 'top left',
                       pointerEvents: 'none', zIndex: 3,
                     }} draggable={false} />
                 )}
 
-                {/* Relief overlays */}
                 {record.elements.map((el) => {
                   const url = overlayUrl(el.overlay_path);
                   if (!url) return null;
@@ -512,18 +482,15 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                       ref={(node) => { if (node) ovRefsMap.current.set(el.id, node); }}
                       src={url} alt={el.label}
                       style={{
-                        position: 'absolute',
-                        left: imgLayout.left, top: imgLayout.top,
+                        position: 'absolute', left: imgLayout.left, top: imgLayout.top,
                         width: imgLayout.width, height: imgLayout.height,
                         objectFit: 'contain', objectPosition: 'top left',
                         pointerEvents: 'none', userSelect: 'none',
-                        zIndex: isHighZ ? 7 : 5,
-                        opacity: 0, display: 'none',
+                        zIndex: isHighZ ? 7 : 5, opacity: 0, display: 'none',
                       }} draggable={false} />
                   );
                 })}
 
-                {/* Inferred overlays */}
                 {inferredEls.map((el) => {
                   const url = overlayUrl(el.inferred_overlay_path);
                   if (!url) return null;
@@ -532,8 +499,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                       ref={(node) => { if (node) infRefsMap.current.set(el.id, node); }}
                       src={url} alt={`${el.label} inferred`}
                       style={{
-                        position: 'absolute',
-                        left: imgLayout.left, top: imgLayout.top,
+                        position: 'absolute', left: imgLayout.left, top: imgLayout.top,
                         width: imgLayout.width, height: imgLayout.height,
                         objectFit: 'contain', objectPosition: 'top left',
                         pointerEvents: 'none', userSelect: 'none',
@@ -542,7 +508,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                   );
                 })}
 
-                {/* Desktop hotspot zones (hidden on mobile — mobile uses touch hit detection) */}
+                {/* Desktop hotspots only */}
                 {!isMobile && sortedElements.map((el) => {
                   const zones = el.bbox_zones || [];
                   if (zones.length === 0) return null;
@@ -576,7 +542,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                           fontFamily: 'monospace', fontSize: '0.6rem', letterSpacing: '0.05em', fontWeight: 600,
                           padding: '2px 6px', borderRadius: 3,
                           color: isLocked ? '#e8d49a' : '#c8a96e', background: 'rgba(0,0,0,0.6)',
-                          textShadow: isLocked ? '0 0 8px rgba(200,169,110,0.5)' : 'none',
                         }}>
                           {el.label}
                           {el.inferred_overlay_path && <span style={{ color: '#66ff96', marginLeft: 4 }}>+inf</span>}
@@ -587,56 +552,59 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                 )}
               </div>
 
-              {/* Multi-select badge */}
-              {multiSelect && (
-                <div className="absolute top-2 right-2 z-30">
-                  <span className="font-mono text-[0.56rem] text-mapsa-gold bg-black/70 px-2.5 py-1 rounded border border-mapsa-gold/40">
-                    {isMobile ? 'GROUP · Tap elements' : 'GROUP SELECT · Click elements · Press M to exit'}</span>
+              {/* Floating controls — top */}
+              {isMobile && (
+                <div className="absolute top-2 left-2 right-2 z-40 flex items-center gap-2">
+                  <button
+                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setMultiSelect((p) => !p); }}
+                    className="mapsa-btn text-2xs shadow-lg"
+                    style={{ background: multiSelect ? '#c8a96e' : 'rgba(31,26,20,0.9)', color: multiSelect ? '#18140f' : '#e8dcc8' }}>
+                    {multiSelect ? '✓ Group' : 'Group'}</button>
+                  {lockedEls.length > 0 && (
+                    <button
+                      onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setLockedEls([]); setMultiSelect(false); }}
+                      className="mapsa-btn text-2xs shadow-lg"
+                      style={{ background: 'rgba(31,26,20,0.9)' }}>
+                      Clear ({lockedEls.length})</button>
+                  )}
+                  <div className="ml-auto flex gap-1.5">
+                    {zoom > 1 && (
+                      <button onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); resetZoom(); }}
+                        className="mapsa-btn text-2xs shadow-lg" style={{ background: 'rgba(31,26,20,0.9)' }}>Reset</button>
+                    )}
+                    <button onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); toggleFullscreen(); }}
+                      className="mapsa-btn text-2xs shadow-lg" style={{ background: 'rgba(31,26,20,0.9)' }}>⛶</button>
+                    {isFullscreen && (
+                      <button onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); document.exitFullscreen().catch(() => {}); }}
+                        className="mapsa-btn text-2xs shadow-lg" style={{ background: 'rgba(31,26,20,0.9)' }}>Esc</button>
+                    )}
+                  </div>
                 </div>
               )}
 
-              {/* Hint */}
-              {!lockedEls.length && !hoveredEl && record.elements.length > 0 && (
+              {/* Multi-select badge */}
+              {multiSelect && !isMobile && (
+                <div className="absolute top-2 right-2 z-30">
+                  <span className="font-mono text-[0.56rem] text-mapsa-gold bg-black/70 px-2.5 py-1 rounded border border-mapsa-gold/40">
+                    GROUP SELECT · Click elements · Press M to exit</span>
+                </div>
+              )}
+
+              {/* Hint — hidden after first interaction */}
+              {!hasInteracted && !lockedEls.length && !hoveredEl && record.elements.length > 0 && (
                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
                   <span className="font-cinzel text-[0.5rem] text-mapsa-muted/50 tracking-[0.2em] uppercase bg-black/30 px-3 py-1.5 rounded">
                     {isMobile ? 'Tap a glyph · Pinch to zoom' : 'Hover to preview · Click to lock · Ctrl+Scroll to zoom'}</span>
                 </div>
               )}
             </div>
-
-            {/* Mobile floating controls */}
-            {isMobile && record.elements.length > 0 && (
-              <div className="absolute bottom-4 left-4 right-4 z-40 flex items-center gap-2">
-                <button
-                  onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setMultiSelect((p) => !p); }}
-                  className="mapsa-btn text-2xs shadow-lg"
-                  style={{ background: multiSelect ? '#c8a96e' : 'rgba(31,26,20,0.9)', color: multiSelect ? '#18140f' : '#e8dcc8' }}>
-                  {multiSelect ? '✓ Group' : 'Group'}</button>
-                {lockedEls.length > 0 && (
-                  <button
-                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setLockedEls([]); setMultiSelect(false); }}
-                    className="mapsa-btn text-2xs shadow-lg"
-                    style={{ background: 'rgba(31,26,20,0.9)' }}>
-                    Clear ({lockedEls.length})</button>
-                )}
-                {zoom > 1 && (
-                  <button
-                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); resetZoom(); }}
-                    className="mapsa-btn text-2xs shadow-lg ml-auto"
-                    style={{ background: 'rgba(31,26,20,0.9)' }}>
-                    Reset</button>
-                )}
-              </div>
-            )}
           </div>
 
-          {/* Caption */}
           <div className="px-4 pb-2 shrink-0">
             <p className="text-[0.69rem] text-mapsa-muted leading-snug">{record.title}</p>
             <p className="text-[0.56rem] text-mapsa-muted">{record.photographer} · {record.date_photographed}</p>
           </div>
 
-          {/* Citations */}
           <div className="shrink-0 border-t border-mapsa-border bg-mapsa-panel-alt px-4 py-3 min-h-[120px]">
             {selectedElementData.length === 0 ? (
               <p className="font-garamond text-sm text-mapsa-muted/50 italic">Select a glyph to view primary sources &amp; citations.</p>
@@ -670,22 +638,13 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           </div>
         </div>
 
-        {/* Sidebar */}
         <GlyphSidebar
-          record={record}
-          annotations={localAnnotations}
-          selectedElements={selectedElementData}
-          lockedEls={lockedEls}
-          matchingGroupings={matchingGroupings}
-          multiSelect={multiSelect}
-          hiddenSubs={hiddenSubs}
-          isMobile={isMobile}
-          onToggleSub={toggleSub}
-          onToggleMultiSelect={() => setMultiSelect((prev) => !prev)}
-          onSelectElement={handleSelectElement}
-          onSelectGrouping={handleSelectGrouping}
-          onSubmitAnnotation={handleSubmitAnnotation}
-          onAddGrouping={handleAddGrouping}
+          record={record} annotations={localAnnotations} selectedElements={selectedElementData}
+          lockedEls={lockedEls} matchingGroupings={matchingGroupings} multiSelect={multiSelect}
+          hiddenSubs={hiddenSubs} isMobile={isMobile}
+          onToggleSub={toggleSub} onToggleMultiSelect={() => setMultiSelect((prev) => !prev)}
+          onSelectElement={handleSelectElement} onSelectGrouping={handleSelectGrouping}
+          onSubmitAnnotation={handleSubmitAnnotation} onAddGrouping={handleAddGrouping}
         />
       </div>
 

@@ -105,8 +105,11 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
+  // Pinch state
   const pinchBaseZoom = useRef(1);
   const pinchBaseDist = useRef(0);
+  const pinchMid = useRef({ x: 0, y: 0 });
+  const pinchBasePan = useRef({ x: 0, y: 0 });
   const touchCount = useRef(0);
   const touchMoved = useRef(false);
   const touchStartPos = useRef({ x: 0, y: 0 });
@@ -231,15 +234,20 @@ export default function RecordViewer({ record }: RecordViewerProps) {
 
   const syncLayout = useCallback(() => {
     if (!wrapRef.current || !imgRef.current) return;
+    // Get unscaled image position relative to wrap div
+    // With transform: translate(pan) scale(zoom) origin 0 0,
+    // the image's getBoundingClientRect includes the transform.
+    // We need the pre-transform layout for overlay positioning.
     const wr = wrapRef.current.getBoundingClientRect();
     const ir = imgRef.current.getBoundingClientRect();
+    // Undo the transform to get base coordinates
     setImgLayout({
-      left: (ir.left - wr.left) / zoom,
-      top: (ir.top - wr.top) / zoom,
+      left: (ir.left - wr.left - pan.x) / zoom,
+      top: (ir.top - wr.top - pan.y) / zoom,
       width: ir.width / zoom,
       height: ir.height / zoom,
     });
-  }, [zoom]);
+  }, [zoom, pan.x, pan.y]);
 
   useEffect(() => {
     syncLayout();
@@ -268,7 +276,11 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   }
   function handleMouseMoveContainer(e: React.MouseEvent) {
     if (isPanning) {
-      const p = clampPan(panStart.current.panX + (e.clientX - panStart.current.x), panStart.current.panY + (e.clientY - panStart.current.y), zoom);
+      const p = clampPan(
+        panStart.current.panX + (e.clientX - panStart.current.x),
+        panStart.current.panY + (e.clientY - panStart.current.y),
+        zoom
+      );
       setPan(p);
     }
   }
@@ -283,6 +295,15 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       pinchBaseDist.current = Math.hypot(dx, dy);
       pinchBaseZoom.current = zoom;
+      pinchBasePan.current = { x: pan.x, y: pan.y };
+      // Midpoint of the two fingers relative to the container
+      if (containerRef.current) {
+        const cr = containerRef.current.getBoundingClientRect();
+        pinchMid.current = {
+          x: (e.touches[0].clientX + e.touches[1].clientX) / 2 - cr.left,
+          y: (e.touches[0].clientY + e.touches[1].clientY) / 2 - cr.top,
+        };
+      }
     } else if (e.touches.length === 1) {
       touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       if (zoom > 1) {
@@ -297,14 +318,27 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       touchMoved.current = true;
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
-      setZoom(Math.max(1, Math.min(6, pinchBaseZoom.current * (Math.hypot(dx, dy) / pinchBaseDist.current))));
+      const dist = Math.hypot(dx, dy);
+      const newZoom = Math.max(1, Math.min(6, pinchBaseZoom.current * (dist / pinchBaseDist.current)));
+
+      // Adjust pan so the pinch midpoint stays fixed on screen
+      // The point under the fingers at pinchStart was at:
+      //   containerPoint = (pinchMid - basePan) / baseZoom
+      // After zoom change, to keep that point under the fingers:
+      //   newPan = pinchMid - containerPoint * newZoom
+      const cpx = (pinchMid.current.x - pinchBasePan.current.x) / pinchBaseZoom.current;
+      const cpy = (pinchMid.current.y - pinchBasePan.current.y) / pinchBaseZoom.current;
+      const newPanX = pinchMid.current.x - cpx * newZoom;
+      const newPanY = pinchMid.current.y - cpy * newZoom;
+
+      setZoom(newZoom);
+      setPan(clampPan(newPanX, newPanY, newZoom));
     } else if (e.touches.length === 1 && isPanning && zoom > 1) {
       const p = clampPan(panStart.current.panX + (e.touches[0].clientX - panStart.current.x), panStart.current.panY + (e.touches[0].clientY - panStart.current.y), zoom);
       setPan(p);
-      // Only mark as moved if finger traveled more than 10px (otherwise it's a tap)
-      const dx = e.touches[0].clientX - touchStartPos.current.x;
-      const dy = e.touches[0].clientY - touchStartPos.current.y;
-      if (Math.hypot(dx, dy) > 10) touchMoved.current = true;
+      const fdx = e.touches[0].clientX - touchStartPos.current.x;
+      const fdy = e.touches[0].clientY - touchStartPos.current.y;
+      if (Math.hypot(fdx, fdy) > 10) touchMoved.current = true;
     }
   }
 
@@ -315,6 +349,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     if (e.touches.length === 0) {
       pinchBaseDist.current = 0;
       setIsPanning(false);
+      // If zoomed back to 1, reset pan
+      if (zoom <= 1) setPan({ x: 0, y: 0 });
     }
 
     if (!wasPinch && !wasMoved && e.changedTouches.length === 1) {
@@ -464,12 +500,9 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
             >
               <div ref={wrapRef} className="relative h-full" style={{
-                transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                transformOrigin: 'center center',
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: '0 0',
                 transition: isPanning ? 'none' : 'transform 0.15s ease-out',
-                display: isFullscreen ? 'flex' : undefined,
-                alignItems: isFullscreen ? 'center' : undefined,
-                justifyContent: isFullscreen ? 'center' : undefined,
               }}>
                 {backgroundUrl && (
                   <img ref={imgRef} src={backgroundUrl} alt="Base photograph"
@@ -482,6 +515,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                       objectFit: 'contain',
                       objectPosition: 'top left',
                       boxShadow: '0 6px 28px rgba(0,0,0,.55)',
+                      margin: isFullscreen ? '0 auto' : undefined,
                     }}
                     onLoad={() => setTimeout(syncLayout, 50)} draggable={false} />
                 )}

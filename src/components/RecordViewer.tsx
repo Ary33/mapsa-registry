@@ -6,6 +6,7 @@ import type {
   Annotation,
   CandidateElement,
   GroupingHypothesis,
+  BBoxZone,
 } from "@/lib/types";
 import { overlayUrl, photoUrl, submitAnnotation } from "@/lib/data";
 import type { AnnotationFormData } from "./sidebar/AnnotationsTab";
@@ -51,9 +52,32 @@ function clearGlow(el: HTMLElement) { el.style.filter = ''; }
 
 const HIGH_Z_LABELS = ['E22'];
 
+// ── Hit test: check if a normalized point (0-1) is inside any bbox_zone for an element ──
+function hitTestZones(
+  elements: CandidateElement[],
+  nx: number, ny: number
+): string | null {
+  // Test HIGH_Z elements first (they're on top visually)
+  for (const el of elements) {
+    if (!HIGH_Z_LABELS.includes(el.label)) continue;
+    for (const z of (el.bbox_zones || [])) {
+      if (nx >= z.left && nx <= z.left + z.width && ny >= z.top && ny <= z.top + z.height) return el.id;
+    }
+  }
+  // Then all others
+  for (const el of elements) {
+    if (HIGH_Z_LABELS.includes(el.label)) continue;
+    for (const z of (el.bbox_zones || [])) {
+      if (nx >= z.left && nx <= z.left + z.width && ny >= z.top && ny <= z.top + z.height) return el.id;
+    }
+  }
+  return null;
+}
+
 export default function RecordViewer({ record }: RecordViewerProps) {
   const { profile } = useAuth();
   const wrapRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
   const ovRefsMap = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -76,14 +100,19 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(record.annotations);
   const [localGroupings, setLocalGroupings] = useState<GroupingHypothesis[]>(record.groupings);
   const [imgLayout, setImgLayout] = useState({ left: 0, top: 0, width: 0, height: 0 });
+
+  // Zoom/pan state
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
-  const pinchStart = useRef<number | null>(null);
 
-  // Track if a touch was a pinch (to avoid selecting on pinch end)
-  const wasPinch = useRef(false);
+  // Pinch state — store baseline zoom and distance at pinch start
+  const pinchBaseZoom = useRef(1);
+  const pinchBaseDist = useRef(0);
+  const touchCount = useRef(0);
+  const touchMoved = useRef(false);
+  const touchStartPos = useRef({ x: 0, y: 0 });
 
   const inferredEls = record.elements.filter((el) => el.inferred_overlay_path);
 
@@ -125,15 +154,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const isSubHidden = hidden.has(`${label}-relief`);
       const shouldShow = !isSubHidden && (glyphsOn || activeIds.has(id));
       const shouldGlow = activeIds.has(id) && !isSubHidden;
-      if (shouldShow) {
-        img.style.display = 'block';
-        img.style.opacity = '1';
-        if (!shouldGlow) clearGlow(img);
-      } else {
-        img.style.display = 'none';
-        img.style.opacity = '0';
-        clearGlow(img);
-      }
+      if (shouldShow) { img.style.display = 'block'; img.style.opacity = '1'; if (!shouldGlow) clearGlow(img); }
+      else { img.style.display = 'none'; img.style.opacity = '0'; clearGlow(img); }
     });
 
     infRefsMap.current.forEach((img, id) => {
@@ -142,19 +164,11 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const isSubHidden = hidden.has(`${label}-inferred`);
       const shouldShow = !isSubHidden && (inferredOn || glyphsOn || activeIds.has(id));
       const shouldGlow = (activeIds.has(id) || inferredOn) && !isSubHidden;
-      if (shouldShow) {
-        img.style.display = 'block';
-        img.style.opacity = '1';
-        if (!shouldGlow) clearGlow(img);
-      } else {
-        img.style.display = 'none';
-        img.style.opacity = '0';
-        clearGlow(img);
-      }
+      if (shouldShow) { img.style.display = 'block'; img.style.opacity = '1'; if (!shouldGlow) clearGlow(img); }
+      else { img.style.display = 'none'; img.style.opacity = '0'; clearGlow(img); }
     });
 
-    const needsAnim = activeIds.size > 0 || inferredOn;
-    if (needsAnim) startAnim(); else stopAnim();
+    if (activeIds.size > 0 || inferredOn) startAnim(); else stopAnim();
   }
 
   useEffect(() => { syncOverlays(); }, [glyphsOn, inferredOn, bgOn]);
@@ -225,49 +239,131 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     return () => { clearTimeout(t); window.removeEventListener('resize', syncLayout); };
   }, [syncLayout]);
 
-  // ── Zoom (desktop only for buttons) ──
+  // ── Clamp pan to keep image in view ──
+  function clampPan(px: number, py: number, z: number): { x: number; y: number } {
+    if (!containerRef.current || !imgRef.current) return { x: px, y: py };
+    const cr = containerRef.current.getBoundingClientRect();
+    const maxPanX = Math.max(0, (imgLayout.width * z - cr.width) / 2);
+    const maxPanY = Math.max(0, (imgLayout.height * z - cr.height) / 2);
+    return {
+      x: Math.max(-maxPanX, Math.min(maxPanX, px)),
+      y: Math.max(-maxPanY, Math.min(maxPanY, py)),
+    };
+  }
+
+  // ── Desktop zoom ──
   function handleZoom(delta: number) { setZoom((prev) => Math.max(1, Math.min(6, prev + delta))); }
   function resetZoom() { setZoom(1); setPan({ x: 0, y: 0 }); }
-  function handleWheel(e: React.WheelEvent) { if (e.ctrlKey || e.metaKey) { e.preventDefault(); handleZoom(e.deltaY > 0 ? -0.3 : 0.3); } }
+  function handleWheel(e: React.WheelEvent) {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      handleZoom(e.deltaY > 0 ? -0.3 : 0.3);
+    }
+  }
 
   // ── Desktop pan ──
-  function handleMouseDown(e: React.MouseEvent) { if (zoom > 1 && e.button === 0) { setIsPanning(true); panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y }; } }
-  function handleMouseMoveContainer(e: React.MouseEvent) { if (isPanning) setPan({ x: panStart.current.panX + (e.clientX - panStart.current.x), y: panStart.current.panY + (e.clientY - panStart.current.y) }); }
+  function handleMouseDown(e: React.MouseEvent) {
+    if (zoom > 1 && e.button === 0) {
+      setIsPanning(true);
+      panStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+    }
+  }
+  function handleMouseMoveContainer(e: React.MouseEvent) {
+    if (isPanning) {
+      const newPan = clampPan(
+        panStart.current.panX + (e.clientX - panStart.current.x),
+        panStart.current.panY + (e.clientY - panStart.current.y),
+        zoom
+      );
+      setPan(newPan);
+    }
+  }
   function handleMouseUp() { setIsPanning(false); }
 
-  // ── Mobile pinch-to-zoom + pan ──
+  // ── Mobile touch handling ──
+  // All mobile tap detection happens here on the container — no hotspot divs on mobile
   function handleTouchStart(e: React.TouchEvent) {
-    wasPinch.current = false;
+    touchCount.current = e.touches.length;
+    touchMoved.current = false;
+
     if (e.touches.length === 2) {
-      wasPinch.current = true;
+      // Pinch start — store baseline
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
-      pinchStart.current = Math.hypot(dx, dy);
-    } else if (e.touches.length === 1 && zoom > 1) {
-      setIsPanning(true);
-      panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, panX: pan.x, panY: pan.y };
+      pinchBaseDist.current = Math.hypot(dx, dy);
+      pinchBaseZoom.current = zoom;
+    } else if (e.touches.length === 1) {
+      touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      if (zoom > 1) {
+        setIsPanning(true);
+        panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, panX: pan.x, panY: pan.y };
+      }
     }
   }
 
   function handleTouchMove(e: React.TouchEvent) {
-    if (e.touches.length === 2 && pinchStart.current !== null) {
-      wasPinch.current = true;
+    touchMoved.current = true;
+
+    if (e.touches.length === 2 && pinchBaseDist.current > 0) {
+      // Pinch zoom — compute from baseline, not incrementally
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const dist = Math.hypot(dx, dy);
-      setZoom((prev) => Math.max(1, Math.min(6, prev * (dist / pinchStart.current!))));
-      pinchStart.current = dist;
-    } else if (e.touches.length === 1 && isPanning) {
-      setPan({
-        x: panStart.current.panX + (e.touches[0].clientX - panStart.current.x),
-        y: panStart.current.panY + (e.touches[0].clientY - panStart.current.y),
-      });
+      const ratio = dist / pinchBaseDist.current;
+      const newZoom = Math.max(1, Math.min(6, pinchBaseZoom.current * ratio));
+      setZoom(newZoom);
+    } else if (e.touches.length === 1 && isPanning && zoom > 1) {
+      const newPan = clampPan(
+        panStart.current.panX + (e.touches[0].clientX - panStart.current.x),
+        panStart.current.panY + (e.touches[0].clientY - panStart.current.y),
+        zoom
+      );
+      setPan(newPan);
     }
   }
 
-  function handleTouchEnd() {
-    pinchStart.current = null;
-    setIsPanning(false);
+  function handleTouchEnd(e: React.TouchEvent) {
+    const wasPinch = touchCount.current >= 2;
+    const wasMoved = touchMoved.current;
+
+    // Reset pinch state
+    if (e.touches.length === 0) {
+      pinchBaseDist.current = 0;
+      setIsPanning(false);
+    }
+
+    // If it was a simple tap (1 finger, didn't move), do hit detection
+    if (!wasPinch && !wasMoved && e.changedTouches.length === 1) {
+      const touch = e.changedTouches[0];
+      const hitId = getTouchHitElement(touch.clientX, touch.clientY);
+      if (hitId) {
+        handleClickElement(hitId);
+      } else if (!multiSelect) {
+        // Tapped empty area — deselect
+        setLockedEls([]);
+      }
+    }
+
+    touchCount.current = e.touches.length;
+  }
+
+  // ── Convert touch screen coords to normalized image coords and hit test ──
+  function getTouchHitElement(clientX: number, clientY: number): string | null {
+    if (!containerRef.current || !imgRef.current) return null;
+    const cr = containerRef.current.getBoundingClientRect();
+
+    // Account for zoom and pan
+    // The wrapRef transform is: scale(zoom) translate(pan.x/zoom, pan.y/zoom)
+    // So a screen point maps to wrap-space as:
+    const wrapX = (clientX - cr.left - pan.x) / zoom;
+    const wrapY = (clientY - cr.top - pan.y) / zoom;
+
+    // Now convert to normalized image coords (0-1)
+    const nx = (wrapX - imgLayout.left) / imgLayout.width;
+    const ny = (wrapY - imgLayout.top) / imgLayout.height;
+
+    if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return null;
+    return hitTestZones(record.elements, nx, ny);
   }
 
   // ── Derived state ──
@@ -282,12 +378,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     else setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [id]);
     setHiddenSubs(new Set());
     hiddenSubsRef.current = new Set();
-  }
-
-  function handleTapElement(id: string) {
-    // Only select if it wasn't a pinch gesture
-    if (wasPinch.current) return;
-    handleClickElement(id);
   }
 
   function handleSelectGrouping(g: GroupingHypothesis) { setLockedEls(g.element_ids); setMultiSelect(false); }
@@ -335,7 +425,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const backgroundUrl = photoUrl(record.background_path);
   const baseOverlayUrl = overlayUrl(record.base_overlay_path);
 
-  // Sort elements so HIGH_Z hotspots render last (on top in DOM)
+  // Sort elements for desktop hotspot rendering (HIGH_Z last = on top)
   const sortedElements = [...record.elements].sort((a, b) => {
     const aHigh = HIGH_Z_LABELS.includes(a.label);
     const bHigh = HIGH_Z_LABELS.includes(b.label);
@@ -355,7 +445,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
 
       <div className="flex flex-col lg:flex-row" style={{ minHeight: 'calc(100vh - 120px)' }}>
         <div className="flex-1 min-w-[320px] flex flex-col border-r border-mapsa-border overflow-hidden">
-          {/* Layer toggles + zoom (zoom buttons hidden on mobile) */}
+          {/* Layer toggles + zoom (desktop only) */}
           <div className="flex gap-2 flex-wrap px-4 pt-3 pb-2 shrink-0 border-b border-mapsa-border/40 items-center">
             <span className="mapsa-label self-center mr-1">Layers</span>
             <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setBgOn((p) => !p); }}
@@ -366,7 +456,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               className={`mapsa-btn text-2xs ${inferredOn ? 'mapsa-btn-active' : ''}`}
               style={{ borderColor: inferredOn ? '#7ea8be' : undefined, background: inferredOn ? '#7ea8be' : undefined, color: inferredOn ? '#18140f' : undefined }}>
               Inferred</button>
-            {/* Zoom buttons — desktop only */}
             {!isMobile && (
               <div className="ml-auto flex items-center gap-1.5">
                 <button onMouseDown={(e) => { e.preventDefault(); handleZoom(-0.5); }} className="mapsa-btn text-2xs px-2">−</button>
@@ -380,6 +469,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           {/* Image area */}
           <div className="flex-1 min-h-0 px-4 pb-2 relative">
             <div
+              ref={containerRef}
               className="relative h-full overflow-hidden rounded-md border border-mapsa-border"
               style={{ cursor: zoom > 1 ? 'grab' : 'default', touchAction: 'none' }}
               onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMoveContainer}
@@ -389,8 +479,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
             >
               <div ref={wrapRef} className="relative h-full" style={{
                 transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                transformOrigin: 'top left',
-                transition: isPanning ? 'none' : 'transform 0.2s ease',
+                transformOrigin: 'center center',
+                transition: isPanning ? 'none' : 'transform 0.15s ease-out',
               }}>
                 {/* Base photo */}
                 {backgroundUrl && (
@@ -452,8 +542,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                   );
                 })}
 
-                {/* Hotspot zones from database */}
-                {sortedElements.map((el) => {
+                {/* Desktop hotspot zones (hidden on mobile — mobile uses touch hit detection) */}
+                {!isMobile && sortedElements.map((el) => {
                   const zones = el.bbox_zones || [];
                   if (zones.length === 0) return null;
                   const isHighZ = HIGH_Z_LABELS.includes(el.label);
@@ -467,13 +557,9 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                       cursor: 'pointer', zIndex: isHighZ ? 22 : 20,
                       background: 'transparent',
                     }}
-                      onMouseEnter={() => { if (isMobile || lockedEls.length > 0) return; setHoveredEl(el.id); }}
-                      onMouseLeave={() => { if (isMobile || lockedEls.length > 0) return; setHoveredEl(null); }}
+                      onMouseEnter={() => { if (lockedEls.length > 0) return; setHoveredEl(el.id); }}
+                      onMouseLeave={() => { if (lockedEls.length > 0) return; setHoveredEl(null); }}
                       onClick={(e) => { e.stopPropagation(); handleClickElement(el.id); }}
-                      onTouchEnd={(e) => {
-                        e.stopPropagation();
-                        handleTapElement(el.id);
-                      }}
                     />
                   ));
                 })}
@@ -505,7 +591,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               {multiSelect && (
                 <div className="absolute top-2 right-2 z-30">
                   <span className="font-mono text-[0.56rem] text-mapsa-gold bg-black/70 px-2.5 py-1 rounded border border-mapsa-gold/40">
-                    {isMobile ? 'GROUP SELECT · Tap elements' : 'GROUP SELECT · Click elements · Press M to exit'}</span>
+                    {isMobile ? 'GROUP · Tap elements' : 'GROUP SELECT · Click elements · Press M to exit'}</span>
                 </div>
               )}
 
@@ -513,32 +599,32 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               {!lockedEls.length && !hoveredEl && record.elements.length > 0 && (
                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
                   <span className="font-cinzel text-[0.5rem] text-mapsa-muted/50 tracking-[0.2em] uppercase bg-black/30 px-3 py-1.5 rounded">
-                    {isMobile ? 'Tap a glyph to select · Pinch to zoom' : 'Hover to preview · Click to lock · Ctrl+Scroll to zoom'}</span>
+                    {isMobile ? 'Tap a glyph · Pinch to zoom' : 'Hover to preview · Click to lock · Ctrl+Scroll to zoom'}</span>
                 </div>
               )}
             </div>
 
-            {/* Mobile floating controls — over the viewport */}
+            {/* Mobile floating controls */}
             {isMobile && record.elements.length > 0 && (
               <div className="absolute bottom-4 left-4 right-4 z-40 flex items-center gap-2">
                 <button
-                  onTouchEnd={(e) => { e.stopPropagation(); setMultiSelect((p) => !p); }}
-                  className={`mapsa-btn text-2xs shadow-lg ${multiSelect ? 'mapsa-btn-active' : ''}`}
+                  onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setMultiSelect((p) => !p); }}
+                  className="mapsa-btn text-2xs shadow-lg"
                   style={{ background: multiSelect ? '#c8a96e' : 'rgba(31,26,20,0.9)', color: multiSelect ? '#18140f' : '#e8dcc8' }}>
-                  {multiSelect ? '✓ Grouping' : 'Group'}</button>
+                  {multiSelect ? '✓ Group' : 'Group'}</button>
                 {lockedEls.length > 0 && (
                   <button
-                    onTouchEnd={(e) => { e.stopPropagation(); setLockedEls([]); setMultiSelect(false); }}
+                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); setLockedEls([]); setMultiSelect(false); }}
                     className="mapsa-btn text-2xs shadow-lg"
                     style={{ background: 'rgba(31,26,20,0.9)' }}>
                     Clear ({lockedEls.length})</button>
                 )}
                 {zoom > 1 && (
                   <button
-                    onTouchEnd={(e) => { e.stopPropagation(); resetZoom(); }}
+                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); resetZoom(); }}
                     className="mapsa-btn text-2xs shadow-lg ml-auto"
                     style={{ background: 'rgba(31,26,20,0.9)' }}>
-                    Reset Zoom</button>
+                    Reset</button>
                 )}
               </div>
             )}

@@ -283,22 +283,28 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       pinchBaseDist.current = Math.hypot(dx, dy);
       pinchBaseZoom.current = zoom;
-    } else if (e.touches.length === 1 && zoom > 1) {
-      setIsPanning(true);
-      panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, panX: pan.x, panY: pan.y };
+    } else if (e.touches.length === 1) {
+      touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      if (zoom > 1) {
+        setIsPanning(true);
+        panStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, panX: pan.x, panY: pan.y };
+      }
     }
   }
 
   function handleTouchMove(e: React.TouchEvent) {
-    touchMoved.current = true;
     if (e.touches.length === 2 && pinchBaseDist.current > 0) {
+      touchMoved.current = true;
       const dx = e.touches[0].clientX - e.touches[1].clientX;
       const dy = e.touches[0].clientY - e.touches[1].clientY;
-      const dist = Math.hypot(dx, dy);
-      setZoom(Math.max(1, Math.min(6, pinchBaseZoom.current * (dist / pinchBaseDist.current))));
+      setZoom(Math.max(1, Math.min(6, pinchBaseZoom.current * (Math.hypot(dx, dy) / pinchBaseDist.current))));
     } else if (e.touches.length === 1 && isPanning && zoom > 1) {
       const p = clampPan(panStart.current.panX + (e.touches[0].clientX - panStart.current.x), panStart.current.panY + (e.touches[0].clientY - panStart.current.y), zoom);
       setPan(p);
+      // Only mark as moved if finger traveled more than 10px (otherwise it's a tap)
+      const dx = e.touches[0].clientX - touchStartPos.current.x;
+      const dy = e.touches[0].clientY - touchStartPos.current.y;
+      if (Math.hypot(dx, dy) > 10) touchMoved.current = true;
     }
   }
 
@@ -311,7 +317,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       setIsPanning(false);
     }
 
-    // Simple tap — use getBoundingClientRect for accurate hit detection
     if (!wasPinch && !wasMoved && e.changedTouches.length === 1) {
       setHasInteracted(true);
       const touch = e.changedTouches[0];
@@ -445,7 +450,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
             <div
               ref={containerRef}
               className="relative h-full overflow-hidden rounded-md border border-mapsa-border"
-              style={{ cursor: zoom > 1 ? 'grab' : 'default', touchAction: 'none', background: isFullscreen ? '#18140f' : undefined }}
+              style={{ cursor: zoom > 1 ? 'grab' : 'default', touchAction: 'none', background: isFullscreen ? '#18140f' : undefined, height: isFullscreen ? '100vh' : undefined }}
               onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMoveContainer}
               onMouseUp={handleMouseUp}
               onMouseLeave={() => { handleMouseUp(); if (!isMobile && lockedEls.length === 0) setHoveredEl(null); }}
@@ -571,12 +576,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                     {zoom > 1 && (
                       <button onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); resetZoom(); }}
                         className="mapsa-btn text-2xs shadow-lg" style={{ background: 'rgba(31,26,20,0.9)' }}>Reset</button>
-                    )}
-                    <button onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); toggleFullscreen(); }}
-                      className="mapsa-btn text-2xs shadow-lg" style={{ background: 'rgba(31,26,20,0.9)' }}>⛶</button>
-                    {isFullscreen && (
-                      <button onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); document.exitFullscreen().catch(() => {}); }}
-                        className="mapsa-btn text-2xs shadow-lg" style={{ background: 'rgba(31,26,20,0.9)' }}>Esc</button>
                     )}
                   </div>
                 </div>

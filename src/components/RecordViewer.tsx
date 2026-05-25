@@ -14,6 +14,8 @@ import GlyphSidebar from "./GlyphSidebar";
 import StatusBadge from "./StatusBadge";
 import { useAuth } from "@/lib/AuthContext";
 
+import pkg from "../../package.json";
+
 interface RecordViewerProps {
   record: InscriptionRecord;
 }
@@ -414,7 +416,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
         {record.status.map((st) => (
           <StatusBadge key={st} text={st} variant={st === 'NEEDS EXPERT REVIEW' ? 'red' : 'default'} />
         ))}
-        <span className="mapsa-mono text-[0.69rem] ml-auto">v{record.record_version}</span>
+        <span className="mapsa-mono text-[0.69rem] ml-auto">v{pkg.version}</span>
       </div>
 
       <div className="flex flex-col lg:flex-row" style={{ minHeight: 'calc(100vh - 120px)' }}>

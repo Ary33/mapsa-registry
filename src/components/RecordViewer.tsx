@@ -137,20 +137,28 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   }
 
   // ── Fullscreen ──
+  const viewerRef = useRef<HTMLDivElement>(null);
+
   function toggleFullscreen() {
-    if (!containerRef.current) return;
+    if (!viewerRef.current) return;
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+      viewerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
     } else {
       document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
     }
   }
 
   useEffect(() => {
-    function onFsChange() { setIsFullscreen(!!document.fullscreenElement); }
+    function onFsChange() {
+      const fs = !!document.fullscreenElement;
+      setIsFullscreen(fs);
+      // Re-sync layout after fullscreen transition
+      setTimeout(syncLayout, 100);
+      setTimeout(syncLayout, 300);
+    }
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
-  }, []);
+  }, [syncLayout]);
 
   function syncOverlays() {
     const hovered = hoveredRef.current;
@@ -447,11 +455,17 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           </div>
 
           {/* Image area */}
-          <div className="flex-1 min-h-0 px-4 pb-2 relative">
+          <div ref={viewerRef} className={`flex-1 min-h-0 relative ${isFullscreen ? '' : 'px-4 pb-2'}`}
+            style={isFullscreen ? { background: '#18140f', display: 'flex', alignItems: 'center', justifyContent: 'center' } : undefined}>
             <div
               ref={containerRef}
-              className="relative h-full overflow-hidden rounded-md border border-mapsa-border"
-              style={{ cursor: zoom > 1 ? 'grab' : 'default', touchAction: 'none', background: isFullscreen ? '#18140f' : undefined, height: isFullscreen ? '100vh' : undefined }}
+              className="relative overflow-hidden rounded-md border border-mapsa-border"
+              style={{
+                cursor: zoom > 1 ? 'grab' : 'default',
+                touchAction: 'none',
+                width: isFullscreen ? '100vw' : '100%',
+                height: isFullscreen ? '100vh' : '100%',
+              }}
               onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMoveContainer}
               onMouseUp={handleMouseUp}
               onMouseLeave={() => { handleMouseUp(); if (!isMobile && lockedEls.length === 0) setHoveredEl(null); }}
@@ -464,8 +478,16 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               }}>
                 {backgroundUrl && (
                   <img ref={imgRef} src={backgroundUrl} alt="Base photograph"
-                    className="block h-full w-auto max-w-full object-contain select-none"
-                    style={{ objectPosition: 'top left', boxShadow: '0 6px 28px rgba(0,0,0,.55)' }}
+                    className="select-none"
+                    style={{
+                      display: 'block',
+                      height: '100%',
+                      width: 'auto',
+                      maxWidth: isFullscreen ? 'none' : '100%',
+                      objectFit: 'contain',
+                      objectPosition: 'top left',
+                      boxShadow: '0 6px 28px rgba(0,0,0,.55)',
+                    }}
                     onLoad={() => setTimeout(syncLayout, 50)} draggable={false} />
                 )}
 
@@ -558,7 +580,19 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                 )}
               </div>
 
-              {/* Floating controls — top */}
+              {/* Fullscreen exit button */}
+              {isFullscreen && (
+                <div className="absolute top-2 right-2 z-50">
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); document.exitFullscreen().catch(() => {}); }}
+                    onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); document.exitFullscreen().catch(() => {}); }}
+                    className="mapsa-btn text-2xs shadow-lg px-3"
+                    style={{ background: 'rgba(31,26,20,0.9)' }}>
+                    ESC</button>
+                </div>
+              )}
+
+              {/* Floating controls — top (mobile) */}
               {isMobile && (
                 <div className="absolute top-2 left-2 right-2 z-40 flex items-center gap-2">
                   <button

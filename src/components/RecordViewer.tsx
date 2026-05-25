@@ -73,7 +73,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const hiddenSubsRef = useRef<Set<string>>(new Set());
 
   const [bgOn, setBgOn] = useState(false);
-  const [glyphsOn, setGlyphsOn] = useState(false);
+  const [glyphsOn, setGlyphsOn] = useState(true);
   const [inferredOn, setInferredOn] = useState(false);
 
   const [lockedEls, _setLockedEls] = useState<string[]>([]);
@@ -332,9 +332,21 @@ export default function RecordViewer({ record }: RecordViewerProps) {
 
   function handleClickElement(id: string) {
     setHasInteracted(true);
-    if (multiSelect) setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-    else setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [id]);
     setHiddenSubs(new Set()); hiddenSubsRef.current = new Set();
+    if (multiSelect) {
+      setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    } else {
+      // Clear hover so only the clicked element shows
+      hoveredRef.current = null;
+      _setHoveredEl(null);
+      _setLockedEls((prev) => {
+        const next = prev.includes(id) ? [] : [id];
+        lockedRef.current = next;
+        // Synchronously update overlays with the new state
+        setTimeout(() => syncOverlays(), 0);
+        return next;
+      });
+    }
   }
 
   function handleSelectGrouping(g: GroupingHypothesis) { setLockedEls(g.element_ids); setMultiSelect(false); }
@@ -410,13 +422,13 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           <div className="flex gap-2 flex-wrap px-4 pt-3 pb-2 shrink-0 border-b border-mapsa-border/40 items-center">
             <span className="mapsa-label self-center mr-1">Layers</span>
             <button onMouseDown={(e) => { e.preventDefault(); setBgOn((p) => !p); }}
-              className={`mapsa-btn text-2xs ${bgOn ? 'mapsa-btn-active' : ''}`}>BG</button>
+              className={`mapsa-btn text-2xs ${bgOn ? 'mapsa-btn-active' : ''}`}>{isMobile ? 'BG' : 'Background'}</button>
             <button onMouseDown={(e) => { e.preventDefault(); setGlyphsOn((p) => !p); }}
-              className={`mapsa-btn text-2xs ${glyphsOn ? 'mapsa-btn-active' : ''}`}>Shapes</button>
+              className={`mapsa-btn text-2xs ${glyphsOn ? 'mapsa-btn-active' : ''}`}>{isMobile ? 'Shapes' : 'Glyph Shapes'}</button>
             <button onMouseDown={(e) => { e.preventDefault(); setInferredOn((p) => !p); }}
               className={`mapsa-btn text-2xs ${inferredOn ? 'mapsa-btn-active' : ''}`}
               style={{ borderColor: inferredOn ? '#7ea8be' : undefined, background: inferredOn ? '#7ea8be' : undefined, color: inferredOn ? '#18140f' : undefined }}>
-              Inf</button>
+              {isMobile ? 'Inf' : 'Inferred'}</button>
             <div className="ml-auto flex items-center gap-1.5">
               {!isMobile && (
                 <>
@@ -502,8 +514,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                       width: `${zone.width * 100}%`, height: `${zone.height * 100}%`,
                       cursor: 'pointer', zIndex: isHighZ ? 22 : 20,
                     }}
-                      onMouseEnter={() => { if (lockedEls.length > 0) return; setHoveredEl(el.id); }}
-                      onMouseLeave={() => { if (lockedEls.length > 0) return; setHoveredEl(null); }}
+                      onMouseEnter={() => { setHoveredEl(el.id); }}
+                      onMouseLeave={() => { setHoveredEl(null); }}
                       onClick={(e) => { e.stopPropagation(); handleClickElement(el.id); }}
                     />
                   ));

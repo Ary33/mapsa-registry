@@ -25,6 +25,7 @@ interface GlyphSidebarProps {
   matchingGroupings: GroupingHypothesis[];
   multiSelect: boolean;
   hiddenSubs: Set<string>;
+  isMobile: boolean;
   onToggleSub: (key: string) => void;
   onToggleMultiSelect: () => void;
   onSelectElement: (el: CandidateElement) => void;
@@ -46,7 +47,7 @@ const RELATIONSHIP_OPTIONS = [
 
 export default function GlyphSidebar({
   record, annotations, selectedElements, lockedEls, matchingGroupings,
-  multiSelect, hiddenSubs, onToggleSub, onToggleMultiSelect, onSelectElement, onSelectGrouping,
+  multiSelect, hiddenSubs, isMobile, onToggleSub, onToggleMultiSelect, onSelectElement, onSelectGrouping,
   onSubmitAnnotation, onAddGrouping,
 }: GlyphSidebarProps) {
   const { profile } = useAuth();
@@ -366,6 +367,8 @@ export default function GlyphSidebar({
           )}
 
           {/* Legend + nav */}
+          {/* Legend + nav — desktop only */}
+          {!isMobile && (
           <div className="shrink-0 border-t border-mapsa-border bg-mapsa-panel-alt">
             <div className="px-4 py-2.5 flex flex-col gap-1 max-h-[200px] overflow-y-auto">
               {record.elements.map((el) => {
@@ -393,6 +396,7 @@ export default function GlyphSidebar({
                 {lockedEls.length ? `${lockedEls.length} / ${record.elements.length}` : `— / ${record.elements.length}`}</span>
             </div>
           </div>
+          )}
         </div>
       )}
 

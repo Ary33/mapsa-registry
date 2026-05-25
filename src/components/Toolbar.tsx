@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
+import pkg from "../../package.json";
 
 interface ToolbarProps {
   recordId?: string;
@@ -11,7 +12,6 @@ interface ToolbarProps {
 
 export default function Toolbar({
   recordId,
-  recordVersion,
 }: ToolbarProps) {
   const { theme, toggleTheme } = useTheme();
   const { profile, isLoading, signOut } = useAuth();
@@ -46,11 +46,9 @@ export default function Toolbar({
 
       {/* Right */}
       <div className="flex items-center gap-2 shrink-0">
-        {recordVersion && (
-          <span className="font-mono text-2xs text-mapsa-muted">
-            v{recordVersion}
-          </span>
-        )}
+        <span className="font-mono text-2xs text-mapsa-muted">
+          v{pkg.version}
+        </span>
 
         {/* Auth section */}
         {!isLoading && (

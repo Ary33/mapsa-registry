@@ -107,6 +107,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const pinchBaseDist = useRef(0);
   const touchCount = useRef(0);
   const touchMoved = useRef(false);
+  const touchStartPos = useRef({ x: 0, y: 0 });
 
   const inferredEls = record.elements.filter((el) => el.inferred_overlay_path);
 

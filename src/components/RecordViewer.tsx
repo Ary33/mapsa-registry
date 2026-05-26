@@ -356,7 +356,20 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     }
   }
 
-  function handleSelectGrouping(g: GroupingHypothesis) { setLockedEls(g.element_ids); setMultiSelect(false); }
+  function handleSelectGrouping(g: GroupingHypothesis) {
+    console.log('Selecting grouping:', g.title, 'element_ids:', g.element_ids);
+    console.log('Elements in record:', record.elements.map(e => `${e.label}=${e.id}`).join(', '));
+    const matchingLabels = g.element_ids.map(eid => record.elements.find(e => e.id === eid)?.label || 'UNKNOWN').join(', ');
+    console.log('Resolved labels:', matchingLabels);
+    hoveredRef.current = null;
+    _setHoveredEl(null);
+    lockedRef.current = g.element_ids;
+    _setLockedEls(g.element_ids);
+    setMultiSelect(false);
+    setHiddenSubs(new Set());
+    hiddenSubsRef.current = new Set();
+    setTimeout(() => syncOverlays(), 0);
+  }
   function handleSelectElement(el: CandidateElement) { setLockedEls([el.id]); setMultiSelect(false); }
 
   useEffect(() => {

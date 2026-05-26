@@ -337,6 +337,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   // ── Derived ──
   const visibleEls = hoveredEl && !lockedEls.includes(hoveredEl) ? [...lockedEls, hoveredEl] : lockedEls;
   const selectedElementData = record.elements.filter((el) => visibleEls.includes(el.id));
+  const lockedElementData = record.elements.filter((el) => lockedEls.includes(el.id));
   const matchingGroupings = localGroupings.filter(
     (g) => lockedEls.length > 0 && lockedEls.every((id) => g.element_ids.includes(id))
   );
@@ -646,7 +647,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
         </div>
 
         <GlyphSidebar
-          record={record} annotations={localAnnotations} selectedElements={selectedElementData}
+          record={record} annotations={localAnnotations} selectedElements={lockedElementData}
           lockedEls={lockedEls} matchingGroupings={matchingGroupings} multiSelect={multiSelect}
           hiddenSubs={hiddenSubs} isMobile={isMobile}
           onToggleSub={toggleSub} onToggleMultiSelect={() => setMultiSelect((prev) => !prev)}

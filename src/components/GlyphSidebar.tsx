@@ -254,7 +254,13 @@ export default function GlyphSidebar({
             /* ══ NORMAL MODE ══ */
             <div className="flex-1 overflow-y-auto">
 
-              {/* ── Selected Element Detail (appears on top, pushes grid down) ── */}
+              {/* ── Selected Element Detail (appears on top, smooth transition) ── */}
+              <div style={{
+                maxHeight: hasSelection ? '2000px' : '0',
+                opacity: hasSelection ? 1 : 0,
+                overflow: 'hidden',
+                transition: 'max-height 0.35s ease, opacity 0.25s ease',
+              }}>
               {hasSelection && (
                 <div>
                   <div className="px-5 pt-4 pb-3 border-b border-mapsa-border">
@@ -333,6 +339,7 @@ export default function GlyphSidebar({
                   </div>
                 </div>
               )}
+              </div>
 
               {/* ── Groupings Grid (always visible, pushed down by element detail) ── */}
               {showBrowse && record.groupings.length > 0 && (
@@ -376,7 +383,13 @@ export default function GlyphSidebar({
                 </div>
               )}
 
-              {/* ── Active Grouping Detail — ONLY when no individual element is selected ── */}
+              {/* ── Active Grouping Detail — smooth transition, only when no element selected ── */}
+              <div style={{
+                maxHeight: (!hasSelection && activeGroupId) ? '1500px' : '0',
+                opacity: (!hasSelection && activeGroupId) ? 1 : 0,
+                overflow: 'hidden',
+                transition: 'max-height 0.35s ease, opacity 0.25s ease',
+              }}>
               {!hasSelection && activeGroupId && (() => {
                 const g = record.groupings.find((gr) => gr.id === activeGroupId);
                 if (!g) return null;
@@ -409,6 +422,7 @@ export default function GlyphSidebar({
                   </div>
                 );
               })()}
+              </div>
 
               {/* ── Collapsed groupings toggle ── */}
               {!showBrowse && (

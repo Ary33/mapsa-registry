@@ -251,101 +251,10 @@ export default function GlyphSidebar({
             </div>
 
           ) : (
-            /* ══ NORMAL MODE: Browse + Selection ══ */
+            /* ══ NORMAL MODE ══ */
             <div className="flex-1 overflow-y-auto">
 
-              {/* ── Browse Groupings toggle ── */}
-              <div className="px-4 pt-3 pb-2 border-b border-mapsa-border/40 flex items-center justify-between">
-                <button
-                  onMouseDown={(e) => { e.preventDefault(); setShowBrowse((p) => !p); }}
-                  className={`mapsa-btn text-2xs ${showBrowse ? 'mapsa-btn-active' : ''}`}>
-                  {showBrowse ? '◈ Groupings' : '◇ Groupings'}
-                </button>
-                {hasSelection && (
-                  <span className="font-mono text-[0.5rem] text-mapsa-gold">
-                    {selectedElements.map((el) => el.label).join(' + ')}
-                  </span>
-                )}
-              </div>
-
-              {/* ── Browse Groupings Grid ── */}
-              {showBrowse && record.groupings.length > 0 && (
-                <div className="px-4 py-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    {record.groupings.map((g) => {
-                      const isActive = activeGroupId === g.id;
-                      const labels = getGroupLabels(g);
-                      const confColor = CONF_COLORS[g.confidence] || '#7a6f5f';
-                      return (
-                        <div key={g.id}
-                          className="rounded-md border cursor-pointer transition-all"
-                          style={{
-                            borderColor: isActive ? '#c8a96e' : '#3a332c',
-                            background: isActive ? 'rgba(200,169,110,0.08)' : '#1f1a14',
-                          }}
-                          onClick={() => handleSelectGroupCard(g)}>
-                          <div className="p-2.5">
-                            <div className="font-cinzel text-[0.65rem] text-mapsa-gold leading-tight mb-1">
-                              {g.title.replace(/ \/ .*/, '')}
-                            </div>
-                            <div className="font-mono text-[0.5rem] text-mapsa-muted/60 mb-1.5 leading-snug">
-                              {labels}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: confColor }} />
-                              <span className="font-mono text-[0.45rem] text-mapsa-muted/50">{g.confidence}</span>
-                              {g.status === 'published hypothesis' && (
-                                <span className="font-mono text-[0.45rem] text-mapsa-gold/40 ml-auto">published</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* ── Active Grouping Detail ── */}
-              {showBrowse && activeGroupId && (() => {
-                const g = record.groupings.find((gr) => gr.id === activeGroupId);
-                if (!g) return null;
-                const labels = getGroupLabels(g);
-                return (
-                  <div className="px-4 pb-3">
-                    <div className="border border-mapsa-gold/30 rounded-md p-4 bg-mapsa-panel-alt">
-                      <div className="font-cinzel text-sm text-mapsa-gold font-semibold mb-1">
-                        {g.title}
-                      </div>
-                      <div className="font-mono text-[0.56rem] text-mapsa-gold/60 mb-2">
-                        {labels} · {CONFIDENCE_ICON[g.confidence]} {g.confidence} · {g.status}
-                      </div>
-                      <div className="mapsa-section-label mb-1">Interpretation</div>
-                      <p className="font-garamond text-[0.81rem] text-mapsa-text leading-relaxed mb-2">
-                        {g.interpretation}
-                      </p>
-                      {g.interpretation_caution && (
-                        <>
-                          <div className="mapsa-section-label mb-1">Caution</div>
-                          <p className="font-garamond text-[0.75rem] text-mapsa-muted italic leading-relaxed mb-2">
-                            {g.interpretation_caution}
-                          </p>
-                        </>
-                      )}
-                      <div className="font-mono text-[0.5rem] text-mapsa-muted/40 mt-2">
-                        {g.citation_text || `v${g.version} · ${g.created_at?.split('T')[0]}`}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* ── Divider when both browse and selection are showing ── */}
-              {showBrowse && hasSelection && (
-                <div className="border-t border-mapsa-border/40 mx-4" />
-              )}
-
-              {/* ── Selected Element Detail ── */}
+              {/* ── Selected Element Detail (appears on top, pushes grid down) ── */}
               {hasSelection && (
                 <div>
                   <div className="px-5 pt-4 pb-3 border-b border-mapsa-border">
@@ -374,7 +283,6 @@ export default function GlyphSidebar({
                             <span className="mapsa-tag" style={{ borderColor: '#7ea8be', color: '#7ea8be' }}>has inferred reconstruction</span>
                           )}
                         </div>
-                        {/* Sub-layer toggles for split elements */}
                         {singleEl.inferred_overlay_path && lockedEls.includes(singleEl.id) && (
                           <div className="flex gap-2 mt-3">
                             <button
@@ -407,26 +315,6 @@ export default function GlyphSidebar({
                       </div>
                     )}
 
-                    {/* Groupings containing selected elements — only show when browse is hidden */}
-                    {!showBrowse && matchingGroupings.length > 0 && (
-                      <div>
-                        <div className="mapsa-section-label">Part of Groupings</div>
-                        {matchingGroupings.map((g) => (
-                          <div key={g.id} className="mb-3 p-3 rounded border border-mapsa-border bg-mapsa-panel-alt cursor-pointer hover:border-mapsa-gold/40 transition-colors"
-                            onClick={() => onSelectGrouping(g)}>
-                            <div className="flex items-baseline justify-between mb-1">
-                              <span className="font-cinzel text-sm text-mapsa-gold font-semibold">{g.title}</span>
-                              <span className="mapsa-tag text-[0.5rem]">{g.confidence}</span>
-                            </div>
-                            <p className="font-garamond text-xs text-mapsa-text italic leading-relaxed">{g.interpretation}</p>
-                            {g.interpretation_caution && <p className="font-garamond text-xs text-mapsa-muted mt-1">⚠ {g.interpretation_caution}</p>}
-                            <p className="font-mono text-[0.5rem] text-mapsa-muted/40 mt-1.5">
-                              {g.citation_text || ''}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
                     {relevantAnnotations.length > 0 && (
                       <div>
                         <div className="mapsa-section-label">Annotations</div>
@@ -446,8 +334,95 @@ export default function GlyphSidebar({
                 </div>
               )}
 
-              {/* ── Empty state when no groupings and no selection ── */}
-              {!hasSelection && record.groupings.length === 0 && (
+              {/* ── Groupings Grid (always visible, pushed down by element detail) ── */}
+              {showBrowse && record.groupings.length > 0 && (
+                <div className="px-4 py-3 border-t border-mapsa-border/40">
+                  <div className="flex items-center justify-between mb-2">
+                    <button
+                      onMouseDown={(e) => { e.preventDefault(); setShowBrowse((p) => !p); }}
+                      className="mapsa-btn text-2xs mapsa-btn-active">
+                      ◈ Groupings
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {record.groupings.map((g) => {
+                      const isActive = activeGroupId === g.id;
+                      const labels = getGroupLabels(g);
+                      const confColor = CONF_COLORS[g.confidence] || '#7a6f5f';
+                      return (
+                        <div key={g.id}
+                          className="rounded-md border cursor-pointer transition-all"
+                          style={{
+                            borderColor: isActive ? '#c8a96e' : '#3a332c',
+                            background: isActive ? 'rgba(200,169,110,0.08)' : '#1f1a14',
+                          }}
+                          onClick={() => handleSelectGroupCard(g)}>
+                          <div className="p-2.5">
+                            <div className="font-cinzel text-[0.65rem] text-mapsa-gold leading-tight mb-1">
+                              {g.title.replace(/ \/ .*/, '')}
+                            </div>
+                            <div className="font-mono text-[0.5rem] text-mapsa-muted/60 mb-1.5 leading-snug">
+                              {labels}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: confColor }} />
+                              <span className="font-mono text-[0.45rem] text-mapsa-muted/50">{g.confidence}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Active Grouping Detail — ONLY when no individual element is selected ── */}
+              {!hasSelection && activeGroupId && (() => {
+                const g = record.groupings.find((gr) => gr.id === activeGroupId);
+                if (!g) return null;
+                const labels = getGroupLabels(g);
+                return (
+                  <div className="px-4 pb-3">
+                    <div className="border border-mapsa-gold/30 rounded-md p-4 bg-mapsa-panel-alt">
+                      <div className="font-cinzel text-sm text-mapsa-gold font-semibold mb-1">
+                        {g.title}
+                      </div>
+                      <div className="font-mono text-[0.56rem] text-mapsa-gold/60 mb-2">
+                        {labels} · {CONFIDENCE_ICON[g.confidence]} {g.confidence}
+                      </div>
+                      <div className="mapsa-section-label mb-1">Interpretation</div>
+                      <p className="font-garamond text-[0.81rem] text-mapsa-text leading-relaxed mb-2">
+                        {g.interpretation}
+                      </p>
+                      {g.interpretation_caution && (
+                        <>
+                          <div className="mapsa-section-label mb-1">Caution</div>
+                          <p className="font-garamond text-[0.75rem] text-mapsa-muted italic leading-relaxed mb-2">
+                            {g.interpretation_caution}
+                          </p>
+                        </>
+                      )}
+                      <div className="font-mono text-[0.5rem] text-mapsa-muted/40 mt-2">
+                        {g.citation_text || ''}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Collapsed groupings toggle ── */}
+              {!showBrowse && (
+                <div className="px-4 py-3">
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); setShowBrowse(true); }}
+                    className="mapsa-btn text-2xs">
+                    ◇ Show Groupings
+                  </button>
+                </div>
+              )}
+
+              {/* ── Empty state ── */}
+              {!hasSelection && !activeGroupId && record.groupings.length === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center gap-3 px-7 text-center opacity-40 py-12">
                   <span className="text-3xl">◈</span>
                   <span className="font-cinzel text-sm tracking-[0.15em] text-mapsa-gold/80">Select a Glyph</span>

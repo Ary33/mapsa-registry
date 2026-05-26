@@ -456,7 +456,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               <div style={{
                 position: 'relative',
                 height: '100%',
-                display: 'inline-flex',
+                width: 'fit-content',
                 transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
                 transformOrigin: '0 0',
               }}>

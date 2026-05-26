@@ -333,7 +333,7 @@ export default function GlyphSidebar({
                         </>
                       )}
                       <div className="font-mono text-[0.5rem] text-mapsa-muted/40 mt-2">
-                        {g.contributor_name} · v{g.version} · {g.created_at?.split('T')[0]}
+                        {g.citation_text || `v${g.version} · ${g.created_at?.split('T')[0]}`}
                       </div>
                     </div>
                   </div>
@@ -407,8 +407,8 @@ export default function GlyphSidebar({
                       </div>
                     )}
 
-                    {/* Groupings that contain the selected elements */}
-                    {matchingGroupings.length > 0 && (
+                    {/* Groupings containing selected elements — only show when browse is hidden */}
+                    {!showBrowse && matchingGroupings.length > 0 && (
                       <div>
                         <div className="mapsa-section-label">Part of Groupings</div>
                         {matchingGroupings.map((g) => (
@@ -416,12 +416,12 @@ export default function GlyphSidebar({
                             onClick={() => onSelectGrouping(g)}>
                             <div className="flex items-baseline justify-between mb-1">
                               <span className="font-cinzel text-sm text-mapsa-gold font-semibold">{g.title}</span>
-                              <span className="mapsa-tag text-[0.5rem]">{g.status}</span>
+                              <span className="mapsa-tag text-[0.5rem]">{g.confidence}</span>
                             </div>
                             <p className="font-garamond text-xs text-mapsa-text italic leading-relaxed">{g.interpretation}</p>
                             {g.interpretation_caution && <p className="font-garamond text-xs text-mapsa-muted mt-1">⚠ {g.interpretation_caution}</p>}
-                            <span className="font-garamond text-[0.6rem] text-mapsa-muted">
-                              {g.contributor_name} · {CONFIDENCE_ICON[g.confidence]} {g.confidence}</span>
+                            <p className="font-mono text-[0.5rem] text-mapsa-muted/40 mt-1.5">
+                              {g.citation_text || ''}</p>
                           </div>
                         ))}
                       </div>

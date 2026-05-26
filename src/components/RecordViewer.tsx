@@ -145,13 +145,17 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     const activeIds = new Set(locked);
     if (hovered) activeIds.add(hovered);
 
+    // First: clear ALL glow on every overlay
+    ovRefsMap.current.forEach((img) => clearGlow(img));
+    infRefsMap.current.forEach((img) => clearGlow(img));
+
     ovRefsMap.current.forEach((img, id) => {
       const el = record.elements.find((e) => e.id === id);
       const label = el?.label || '';
       const isSubHidden = hidden.has(`${label}-relief`);
       const shouldShow = !isSubHidden && (glyphsOn || activeIds.has(id));
-      if (shouldShow) { img.style.visibility = 'visible'; img.style.opacity = '1'; if (!activeIds.has(id)) clearGlow(img); }
-      else { img.style.visibility = 'hidden'; img.style.opacity = '0'; clearGlow(img); }
+      img.style.visibility = shouldShow ? 'visible' : 'hidden';
+      img.style.opacity = shouldShow ? '1' : '0';
     });
 
     infRefsMap.current.forEach((img, id) => {
@@ -159,8 +163,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const label = el?.label || '';
       const isSubHidden = hidden.has(`${label}-inferred`);
       const shouldShow = !isSubHidden && (inferredOn || glyphsOn || activeIds.has(id));
-      if (shouldShow) { img.style.visibility = 'visible'; img.style.opacity = '1'; if (!activeIds.has(id) && !inferredOn) clearGlow(img); }
-      else { img.style.visibility = 'hidden'; img.style.opacity = '0'; clearGlow(img); }
+      img.style.visibility = shouldShow ? 'visible' : 'hidden';
+      img.style.opacity = shouldShow ? '1' : '0';
     });
 
     if (activeIds.size > 0 || inferredOn) startAnim(); else stopAnim();
@@ -357,10 +361,6 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   }
 
   function handleSelectGrouping(g: GroupingHypothesis) {
-    console.log('Selecting grouping:', g.title, 'element_ids:', g.element_ids);
-    console.log('Elements in record:', record.elements.map(e => `${e.label}=${e.id}`).join(', '));
-    const matchingLabels = g.element_ids.map(eid => record.elements.find(e => e.id === eid)?.label || 'UNKNOWN').join(', ');
-    console.log('Resolved labels:', matchingLabels);
     hoveredRef.current = null;
     _setHoveredEl(null);
     lockedRef.current = g.element_ids;

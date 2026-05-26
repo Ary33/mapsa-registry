@@ -85,6 +85,9 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(record.annotations);
   const [localGroupings, setLocalGroupings] = useState<GroupingHypothesis[]>(record.groupings);
 
+  // Track the rendered image size so the transform container has a fixed size
+  const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
+
   // Simple zoom/pan: CSS transform on the image wrapper
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
@@ -147,8 +150,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const label = el?.label || '';
       const isSubHidden = hidden.has(`${label}-relief`);
       const shouldShow = !isSubHidden && (glyphsOn || activeIds.has(id));
-      if (shouldShow) { img.style.display = 'block'; img.style.opacity = '1'; if (!activeIds.has(id)) clearGlow(img); }
-      else { img.style.display = 'none'; img.style.opacity = '0'; clearGlow(img); }
+      if (shouldShow) { img.style.visibility = 'visible'; img.style.opacity = '1'; if (!activeIds.has(id)) clearGlow(img); }
+      else { img.style.visibility = 'hidden'; img.style.opacity = '0'; clearGlow(img); }
     });
 
     infRefsMap.current.forEach((img, id) => {
@@ -156,8 +159,8 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const label = el?.label || '';
       const isSubHidden = hidden.has(`${label}-inferred`);
       const shouldShow = !isSubHidden && (inferredOn || glyphsOn || activeIds.has(id));
-      if (shouldShow) { img.style.display = 'block'; img.style.opacity = '1'; if (!activeIds.has(id) && !inferredOn) clearGlow(img); }
-      else { img.style.display = 'none'; img.style.opacity = '0'; clearGlow(img); }
+      if (shouldShow) { img.style.visibility = 'visible'; img.style.opacity = '1'; if (!activeIds.has(id) && !inferredOn) clearGlow(img); }
+      else { img.style.visibility = 'hidden'; img.style.opacity = '0'; clearGlow(img); }
     });
 
     if (activeIds.size > 0 || inferredOn) startAnim(); else stopAnim();
@@ -180,16 +183,16 @@ export default function RecordViewer({ record }: RecordViewerProps) {
       const el = record.elements.find((e) => e.id === id);
       const label = el?.label || '';
       const ov = ovRefsMap.current.get(id);
-      if (ov && ov.style.display !== 'none' && !hidden.has(`${label}-relief`)) applyGlow(ov, intensity, isLocked);
+      if (ov && ov.style.visibility !== 'hidden' && !hidden.has(`${label}-relief`)) applyGlow(ov, intensity, isLocked);
       const inf = infRefsMap.current.get(id);
-      if (inf && inf.style.display !== 'none' && !hidden.has(`${label}-inferred`)) applyInferredGlow(inf, intensity, isLocked);
+      if (inf && inf.style.visibility !== 'hidden' && !hidden.has(`${label}-inferred`)) applyInferredGlow(inf, intensity, isLocked);
     });
 
     if (inferredOn) {
       infRefsMap.current.forEach((img, id) => {
         const el = record.elements.find((e) => e.id === id);
         const label = el?.label || '';
-        if (img.style.display !== 'none' && !hidden.has(`${label}-inferred`) && !activeIds.has(id)) applyInferredGlow(img, intensity, true);
+        if (img.style.visibility !== 'hidden' && !hidden.has(`${label}-inferred`) && !activeIds.has(id)) applyInferredGlow(img, intensity, true);
       });
     }
 
@@ -207,7 +210,11 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   useEffect(() => {
     function check() { setIsMobile(window.innerWidth <= 768 || 'ontouchstart' in window || navigator.maxTouchPoints > 0); }
     check(); window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
+    function syncSize() {
+      if (imgRef.current) setImgSize({ w: imgRef.current.offsetWidth, h: imgRef.current.offsetHeight });
+    }
+    window.addEventListener('resize', syncSize);
+    return () => { window.removeEventListener('resize', check); window.removeEventListener('resize', syncSize); };
   }, []);
 
   useEffect(() => { return () => { stopAnim(); }; }, []);
@@ -452,21 +459,26 @@ export default function RecordViewer({ record }: RecordViewerProps) {
               onMouseLeave={() => { handleMouseUp(); if (!isMobile && lockedEls.length === 0) setHoveredEl(null); }}
               onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}
             >
-              {/* This div gets transformed — everything inside moves together */}
+              {/* This div gets transformed — explicit size prevents layout shift */}
               <div style={{
                 position: 'relative',
-                height: '100%',
-                width: 'fit-content',
+                width: imgSize.w || 'auto',
+                height: imgSize.h || '100%',
                 transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
                 transformOrigin: '0 0',
               }}>
-                {/* Base image — sets the size for everything */}
+                {/* Base image — on load, locks the container size */}
                 {backgroundUrl && (
                   <img ref={imgRef} src={backgroundUrl} alt="Base photograph"
                     className="select-none"
                     style={{
                       display: 'block', height: '100%', width: 'auto',
                       boxShadow: '0 6px 28px rgba(0,0,0,.55)',
+                    }}
+                    onLoad={() => {
+                      if (imgRef.current) {
+                        setImgSize({ w: imgRef.current.offsetWidth, h: imgRef.current.offsetHeight });
+                      }
                     }}
                     draggable={false} />
                 )}
@@ -484,7 +496,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                     <img key={`ov-${el.id}`}
                       ref={(node) => { if (node) ovRefsMap.current.set(el.id, node); }}
                       src={url} alt={el.label}
-                      style={{ ...ovStyle, zIndex: HIGH_Z_LABELS.includes(el.label) ? 7 : 5, opacity: 0, display: 'none' }}
+                      style={{ ...ovStyle, zIndex: HIGH_Z_LABELS.includes(el.label) ? 7 : 5, opacity: 0, visibility: 'hidden' as const }}
                       draggable={false} />
                   );
                 })}
@@ -497,7 +509,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                     <img key={`inf-${el.id}`}
                       ref={(node) => { if (node) infRefsMap.current.set(el.id, node); }}
                       src={url} alt={`${el.label} inferred`}
-                      style={{ ...ovStyle, zIndex: 6, opacity: 0, display: 'none' }}
+                      style={{ ...ovStyle, zIndex: 6, opacity: 0, visibility: 'hidden' as const }}
                       draggable={false} />
                   );
                 })}

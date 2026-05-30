@@ -85,6 +85,14 @@ export default function RecordViewer({ record }: RecordViewerProps) {
   const [localAnnotations, setLocalAnnotations] = useState<Annotation[]>(record.annotations);
   const [localGroupings, setLocalGroupings] = useState<GroupingHypothesis[]>(record.groupings);
 
+  // Which established grouping is currently active (clicked). Lifted here so the
+  // viewer banner and the sidebar panel agree. Distinct from element selection:
+  // selecting a grouping also locks its elements (for the highlight) but we no
+  // longer want that to trigger the per-element description dump.
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [bannerGroupId, setBannerGroupId] = useState<string | null>(null);
+  const bannerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Track the rendered image size so the transform container has a fixed size
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
 
@@ -344,6 +352,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
 
   function handleClickElement(id: string) {
     setHasInteracted(true);
+    setActiveGroupId(null);
     setHiddenSubs(new Set()); hiddenSubsRef.current = new Set();
     if (multiSelect) {
       setLockedEls((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
@@ -369,14 +378,24 @@ export default function RecordViewer({ record }: RecordViewerProps) {
     setMultiSelect(false);
     setHiddenSubs(new Set());
     hiddenSubsRef.current = new Set();
+    setActiveGroupId(g.id);
+    // Discreet auto-fading banner in the viewer.
+    setBannerGroupId(g.id);
+    if (bannerTimer.current) clearTimeout(bannerTimer.current);
+    bannerTimer.current = setTimeout(() => setBannerGroupId(null), 4000);
     setTimeout(() => syncOverlays(), 0);
   }
-  function handleSelectElement(el: CandidateElement) { setLockedEls([el.id]); setMultiSelect(false); }
+  function handleSelectElement(el: CandidateElement) {
+    setActiveGroupId(null);
+    setLockedEls([el.id]);
+    setMultiSelect(false);
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         setLockedEls([]); setMultiSelect(false); resetView(); setHiddenSubs(new Set()); hiddenSubsRef.current = new Set();
+        setActiveGroupId(null); setBannerGroupId(null);
       }
       if (e.key === 'm' || e.key === 'M') setMultiSelect((p) => !p);
       if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navElement(1); }
@@ -596,6 +615,28 @@ export default function RecordViewer({ record }: RecordViewerProps) {
                 </div>
               )}
 
+              {/* Grouping-selected banner — discreet, auto-fading */}
+              {(() => {
+                const bg = bannerGroupId ? localGroupings.find((g) => g.id === bannerGroupId) : null;
+                if (!bg) return null;
+                const label = bg.version_label || bg.title;
+                return (
+                  <div
+                    className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 pointer-events-none"
+                    style={{ animation: 'mapsaFadeIn 0.25s ease' }}
+                  >
+                    <div className="bg-black/80 border border-mapsa-gold/40 rounded-md px-4 py-2 text-center shadow-lg">
+                      <div className="font-cinzel text-[0.8rem] text-mapsa-gold-light leading-tight">
+                        {label} grouping selected
+                      </div>
+                      <div className="font-garamond text-[0.6rem] text-mapsa-muted mt-0.5 leading-snug max-w-[260px]">
+                        Keep selecting elements to expand into a new version, or annotate this grouping in the sidebar.
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Hint */}
               {!hasInteracted && !lockedEls.length && !hoveredEl && record.elements.length > 0 && (
                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
@@ -650,6 +691,7 @@ export default function RecordViewer({ record }: RecordViewerProps) {
           record={record} annotations={localAnnotations} selectedElements={lockedElementData}
           lockedEls={lockedEls} matchingGroupings={matchingGroupings} multiSelect={multiSelect}
           hiddenSubs={hiddenSubs} isMobile={isMobile}
+          activeGroupId={activeGroupId} onSetActiveGroup={setActiveGroupId}
           onToggleSub={toggleSub} onToggleMultiSelect={() => setMultiSelect((prev) => !prev)}
           onSelectElement={handleSelectElement} onSelectGrouping={handleSelectGrouping}
           onSubmitAnnotation={handleSubmitAnnotation} onAddGrouping={handleAddGrouping}

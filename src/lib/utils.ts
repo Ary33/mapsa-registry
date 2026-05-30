@@ -107,6 +107,26 @@ export const CONFIDENCE_LEVELS: Confidence[] = [
   "high",
 ];
 
+// ── Report-a-problem channel (community policing of open-published content) ──
+export const MAPSA_CONTACT_EMAIL = "contact@montealbanoaxaca.com";
+
+export function reportProblemMailto(opts: {
+  recordId: string;
+  versionLabel?: string | null;
+  groupingId?: string;
+  title?: string;
+}): string {
+  const ref = opts.versionLabel || opts.title || opts.groupingId || "grouping";
+  const subject = `MAPSA report: ${ref}${opts.groupingId ? ` [${opts.groupingId}]` : ""}`;
+  const body =
+    `Record: ${opts.recordId}\n` +
+    `Grouping: ${ref}${opts.groupingId ? ` (${opts.groupingId})` : ""}\n\n` +
+    `Please describe the problem:\n`;
+  return `mailto:${MAPSA_CONTACT_EMAIL}?subject=${encodeURIComponent(
+    subject
+  )}&body=${encodeURIComponent(body)}`;
+}
+
 export const PHOTO_REQUEST_TYPES = [
   "closer crop",
   "wider context",

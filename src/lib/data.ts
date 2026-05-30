@@ -137,9 +137,10 @@ export async function submitAnnotation(annotation: {
     .from("annotations")
     .insert({
       ...annotation,
-      status: "pending",
+      status: "published",
       version: "1.0",
-      is_published: false,
+      is_published: true,
+      published_at: new Date().toISOString(),
     })
     .select("*")
     .single();
@@ -158,17 +159,63 @@ export async function submitGrouping(grouping: {
   contributor_id: string;
   source_ids: string[];
   confidence: string;
+  parent_grouping_id?: string | null;
 }): Promise<{ data: GroupingHypothesis | null; error: any }> {
+  // Resolve the version label. The UUID is the functional id; version_label is
+  // the human-facing lineage marker ("G01.2"). When deriving from a parent we
+  // walk up to the family root, read every version already in that family, and
+  // take the next free number — a flat per-family counter (G01.1, G01.2, …),
+  // regardless of which version was expanded.
+  let versionLabel: string | null = null;
+  const parentId = grouping.parent_grouping_id ?? null;
+
+  if (parentId) {
+    // Find the parent to get its family stem (the "G01" part of "G01.x").
+    const { data: parent } = await supabase
+      .from("groupings")
+      .select("version_label, parent_grouping_id, record_id")
+      .eq("id", parentId)
+      .single();
+
+    const parentLabel: string | null = parent?.version_label ?? null;
+    const stemMatch = parentLabel ? parentLabel.match(/^(G\d+)/) : null;
+    const stem = stemMatch ? stemMatch[1] : null;
+
+    if (stem) {
+      // Pull all version labels in this record sharing the stem, find the max
+      // minor number, and increment. This keeps the family flat.
+      const { data: family } = await supabase
+        .from("groupings")
+        .select("version_label")
+        .eq("record_id", grouping.record_id)
+        .like("version_label", `${stem}.%`);
+
+      let maxMinor = 0;
+      for (const row of family || []) {
+        const m = (row as any).version_label?.match(/^G\d+\.(\d+)$/);
+        if (m) maxMinor = Math.max(maxMinor, parseInt(m[1], 10));
+      }
+      versionLabel = `${stem}.${maxMinor + 1}`;
+    }
+  }
+
   const { data, error } = await supabase
     .from("groupings")
     .insert({
       ...grouping,
+      parent_grouping_id: parentId,
+      version_label: versionLabel,
       status: "alternative hypothesis",
       version: "1.0",
-      is_published: false,
+      is_published: true,
+      published_at: new Date().toISOString(),
     })
-    .select("*")
+    .select("*, profiles:contributor_id(full_name, affiliation)")
     .single();
 
-  return { data: data as GroupingHypothesis | null, error };
+  const transformed = data
+    ? ({ ...data, contributor_name: (data as any).profiles?.full_name || "Unknown" } as GroupingHypothesis)
+    : null;
+
+  return { data: transformed, error };
 }

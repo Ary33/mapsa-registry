@@ -161,6 +161,9 @@ export interface GroupingHypothesis {
   citation_text: string;
   created_at: string;
   updated_at: string;
+  // Version lineage (UUID stays the functional id; these drive display lineage)
+  version_label: string | null;
+  parent_grouping_id: string | null;
   // Joined fields
   contributor_name?: string;
 }

@@ -8,7 +8,7 @@ import type {
   GroupingHypothesis,
 } from "@/lib/types";
 import type { AnnotationFormData } from "./sidebar/AnnotationsTab";
-import { CONFIDENCE_ICON, CONFIDENCE_LEVELS } from "@/lib/utils";
+import { CONFIDENCE_ICON, CONFIDENCE_LEVELS, reportProblemMailto } from "@/lib/utils";
 import { submitGrouping, submitAnnotation } from "@/lib/data";
 import { useAuth } from "@/lib/AuthContext";
 import AnnotationsTab from "./sidebar/AnnotationsTab";
@@ -26,6 +26,8 @@ interface GlyphSidebarProps {
   multiSelect: boolean;
   hiddenSubs: Set<string>;
   isMobile: boolean;
+  activeGroupId: string | null;
+  onSetActiveGroup: (id: string | null) => void;
   onToggleSub: (key: string) => void;
   onToggleMultiSelect: () => void;
   onSelectElement: (el: CandidateElement) => void;
@@ -55,14 +57,14 @@ const CONF_COLORS: Record<string, string> = {
 
 export default function GlyphSidebar({
   record, annotations, selectedElements, lockedEls, matchingGroupings,
-  multiSelect, hiddenSubs, isMobile, onToggleSub, onToggleMultiSelect, onSelectElement, onSelectGrouping,
+  multiSelect, hiddenSubs, isMobile, activeGroupId, onSetActiveGroup, onToggleSub, onToggleMultiSelect, onSelectElement, onSelectGrouping,
   onSubmitAnnotation, onAddGrouping,
 }: GlyphSidebarProps) {
-  const { profile } = useAuth();
+  const { profile, isResearcher, isAdmin, isPending } = useAuth();
+  const canContribute = isResearcher || isAdmin;
   const [mode, setMode] = useState<SidebarMode>("glyph");
   const [photoSubmitted, setPhotoSubmitted] = useState(false);
   const [showBrowse, setShowBrowse] = useState(true);
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
   // Group form state
   const [groupTitle, setGroupTitle] = useState("");
@@ -95,19 +97,41 @@ export default function GlyphSidebar({
   }
 
   function handleSelectGroupCard(g: GroupingHypothesis) {
-    setActiveGroupId((prev) => prev === g.id ? null : g.id);
-    onSelectGrouping(g);
+    const next = activeGroupId === g.id ? null : g.id;
+    onSetActiveGroup(next);
+    if (next) onSelectGrouping(g);
   }
+
+  // If the current locked selection is a strict superset of an existing
+  // grouping's element set, treat that grouping as the parent we're expanding.
+  // Prefer the active grouping if it qualifies; otherwise the largest subset match.
+  const lockedSet = new Set(lockedEls);
+  const expandParent: GroupingHypothesis | null = (() => {
+    const candidates = record.groupings.filter(
+      (g) =>
+        g.element_ids.length >= 2 &&
+        g.element_ids.length < lockedEls.length &&
+        g.element_ids.every((id) => lockedSet.has(id))
+    );
+    if (candidates.length === 0) return null;
+    if (activeGroupId) {
+      const act = candidates.find((g) => g.id === activeGroupId);
+      if (act) return act;
+    }
+    return candidates.sort((a, b) => b.element_ids.length - a.element_ids.length)[0];
+  })();
+  const expandParentId: string | null = expandParent?.id ?? null;
 
   // ── Submit grouping ──
   const handleSubmitGroup = useCallback(async () => {
-    if (!profile || lockedEls.length < 2 || !groupTitle.trim()) return;
+    if (!profile || !canContribute || lockedEls.length < 2 || !groupTitle.trim()) return;
     setGroupSubmitting(true);
     const { data, error } = await submitGrouping({
       record_id: record.id, title: groupTitle.trim(), element_ids: lockedEls,
       proposed_relationship: groupRelationship, interpretation: groupInterpretation.trim(),
       interpretation_caution: groupCaution.trim(), contributor_id: profile.id,
       source_ids: [], confidence: groupConfidence,
+      parent_grouping_id: expandParentId,
     });
     setGroupSubmitting(false);
     if (error) { console.error("Group submission error:", error); return; }
@@ -117,14 +141,19 @@ export default function GlyphSidebar({
       setGroupTitle(""); setGroupInterpretation(""); setGroupCaution("");
       setTimeout(() => setGroupSuccess(false), 3000);
     }
-  }, [profile, record.id, lockedEls, groupTitle, groupRelationship, groupInterpretation, groupCaution, groupConfidence, onAddGrouping]);
+  }, [profile, canContribute, record.id, lockedEls, groupTitle, groupRelationship, groupInterpretation, groupCaution, groupConfidence, expandParentId, onAddGrouping]);
 
   // ── Submit group annotation ──
   const handleSubmitGroupAnnotation = useCallback(async () => {
-    if (!profile || lockedEls.length < 2 || !groupAnnotation.trim()) return;
+    if (!profile || !canContribute || !groupAnnotation.trim()) return;
+    // If an established grouping is active, attach to its UUID so the annotation
+    // joins that grouping's thread. Otherwise fall back to the ad-hoc element set.
+    const targetIsGrouping = !!activeGroupId;
+    const targetId = activeGroupId || lockedEls.join("+");
+    if (!targetIsGrouping && lockedEls.length < 2) return;
     setGroupAnnSubmitting(true);
     const { data, error } = await submitAnnotation({
-      record_id: record.id, target_type: "grouping", target_id: lockedEls.join("+"),
+      record_id: record.id, target_type: "grouping", target_id: targetId,
       contributor_id: profile.id, type: "interpretive note", body: groupAnnotation.trim(),
       sources_cited: [], confidence: groupAnnConfidence, visibility: "public attributed",
     });
@@ -134,7 +163,7 @@ export default function GlyphSidebar({
       setGroupAnnSuccess(true); setGroupAnnotation("");
       setTimeout(() => setGroupAnnSuccess(false), 3000);
     }
-  }, [profile, record.id, lockedEls, groupAnnotation, groupAnnConfidence]);
+  }, [profile, canContribute, record.id, activeGroupId, lockedEls, groupAnnotation, groupAnnConfidence]);
 
   return (
     <div className="w-full lg:w-[420px] shrink-0 bg-mapsa-panel flex flex-col overflow-hidden">
@@ -205,8 +234,10 @@ export default function GlyphSidebar({
                       {CONFIDENCE_LEVELS.map((c) => <option key={c} value={c}>{CONFIDENCE_ICON[c]} {c}</option>)}
                     </select>
                   </div>
-                  {!profile ? (
-                    <p className="text-xs text-mapsa-muted italic">Sign in to submit groupings.</p>
+                  {!canContribute ? (
+                    <p className="text-xs text-mapsa-muted italic">
+                      {isPending ? "Your account is awaiting approval before you can propose groupings." : "Sign in as an approved researcher to submit groupings."}
+                    </p>
                   ) : (
                     <button className="mapsa-btn-gold w-full" disabled={groupSubmitting || !groupTitle.trim()}
                       onMouseDown={(e) => { e.preventDefault(); handleSubmitGroup(); }}>
@@ -227,8 +258,10 @@ export default function GlyphSidebar({
                       {CONFIDENCE_LEVELS.map((c) => <option key={c} value={c}>{CONFIDENCE_ICON[c]} {c}</option>)}
                     </select>
                   </div>
-                  {!profile ? (
-                    <p className="text-xs text-mapsa-muted italic">Sign in to submit annotations.</p>
+                  {!canContribute ? (
+                    <p className="text-xs text-mapsa-muted italic">
+                      {isPending ? "Your account is awaiting approval before you can annotate." : "Sign in as an approved researcher to submit annotations."}
+                    </p>
                   ) : (
                     <button className="mapsa-btn-gold w-full" disabled={groupAnnSubmitting || !groupAnnotation.trim()}
                       onMouseDown={(e) => { e.preventDefault(); handleSubmitGroupAnnotation(); }}>
@@ -255,7 +288,7 @@ export default function GlyphSidebar({
             <div className="flex-1 overflow-y-auto">
 
               {/* ── Selected Element Detail (appears on top, pushes grid down) ── */}
-              {hasSelection && (
+              {hasSelection && !activeGroupId && (
                 <div>
                   <div className="px-5 pt-4 pb-3 border-b border-mapsa-border">
                     <div className="font-mono text-[0.56rem] tracking-[0.17em] text-mapsa-gold/70 uppercase mb-1.5 leading-relaxed">
@@ -300,7 +333,7 @@ export default function GlyphSidebar({
                       </div>
                     )}
 
-                    {!singleEl && selectedElements.map((el) => (
+                    {!singleEl && !activeGroupId && selectedElements.map((el) => (
                       <div key={el.id} className="border-l-2 border-mapsa-gold/30 pl-3">
                         <p className="font-mono text-xs text-mapsa-gold-light font-semibold">{el.label}</p>
                         <p className="font-garamond text-sm text-mapsa-text leading-relaxed">{el.neutral_description}</p>
@@ -359,7 +392,7 @@ export default function GlyphSidebar({
                           onClick={() => handleSelectGroupCard(g)}>
                           <div className="p-2.5">
                             <div className="font-cinzel text-[0.65rem] text-mapsa-gold leading-tight mb-1">
-                              {g.title.replace(/ \/ .*/, '')}
+                              {(g.version_label ? `${g.version_label} · ` : '') + g.title.replace(/ \/ .*/, '')}
                             </div>
                             <div className="font-mono text-[0.5rem] text-mapsa-muted/60 mb-1.5 leading-snug">
                               {labels}
@@ -376,35 +409,125 @@ export default function GlyphSidebar({
                 </div>
               )}
 
-              {/* ── Active Grouping Detail — ONLY when no individual element is selected ── */}
-              {!hasSelection && activeGroupId && (() => {
+              {/* ── Active Grouping Detail ── */}
+              {activeGroupId && (() => {
                 const g = record.groupings.find((gr) => gr.id === activeGroupId);
                 if (!g) return null;
                 const labels = getGroupLabels(g);
+                const heading = g.version_label ? `${g.version_label} · ${g.title}` : g.title;
+                const groupAnns = annotations.filter(
+                  (a) => a.target_id === g.id &&
+                    (a.status === 'published' || a.status === 'pending')
+                );
+                const canExpandHere = expandParentId === g.id && lockedEls.length > g.element_ids.length;
                 return (
-                  <div className="px-4 pb-3">
+                  <div className="px-4 pt-3 pb-3">
                     <div className="border border-mapsa-gold/30 rounded-md p-4 bg-mapsa-panel-alt">
+                      {/* Title / version */}
                       <div className="font-cinzel text-sm text-mapsa-gold font-semibold mb-1">
-                        {g.title}
+                        {heading}
                       </div>
+                      {/* Element IDs */}
                       <div className="font-mono text-[0.56rem] text-mapsa-gold/60 mb-2">
-                        {labels} · {CONFIDENCE_ICON[g.confidence]} {g.confidence}
+                        {labels}
                       </div>
+                      {/* Interpretation */}
                       <div className="mapsa-section-label mb-1">Interpretation</div>
                       <p className="font-garamond text-[0.81rem] text-mapsa-text leading-relaxed mb-2">
-                        {g.interpretation}
+                        {g.interpretation || <span className="italic text-mapsa-muted">No interpretation provided.</span>}
                       </p>
+                      {/* Caution / Caveats */}
                       {g.interpretation_caution && (
                         <>
-                          <div className="mapsa-section-label mb-1">Caution</div>
+                          <div className="mapsa-section-label mb-1">Caution / Caveats</div>
                           <p className="font-garamond text-[0.75rem] text-mapsa-muted italic leading-relaxed mb-2">
                             {g.interpretation_caution}
                           </p>
                         </>
                       )}
-                      <div className="font-mono text-[0.5rem] text-mapsa-muted/40 mt-2">
-                        {g.citation_text || ''}
+                      {/* Base Citation */}
+                      <div className="mapsa-section-label mb-1">Base Citation</div>
+                      <div className="font-mono text-[0.56rem] text-mapsa-muted/70 mb-2 leading-snug">
+                        {g.citation_text || <span className="italic">Citation generated on publish.</span>}
                       </div>
+                      {/* Confidence + status + contributor */}
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className="mapsa-tag">{CONFIDENCE_ICON[g.confidence]} {g.confidence}</span>
+                        <span className="mapsa-tag">{g.status}</span>
+                        <span className="font-mono text-[0.56rem] text-mapsa-muted/60">{g.contributor_name}</span>
+                      </div>
+                      {/* Report a problem */}
+                      <a
+                        href={reportProblemMailto({ recordId: record.id, versionLabel: g.version_label, groupingId: g.id, title: g.title })}
+                        className="inline-block font-mono text-[0.56rem] text-mapsa-muted/60 underline hover:text-mapsa-gold mt-1.5"
+                      >
+                        ⚐ Report a problem with this grouping
+                      </a>
+                    </div>
+
+                    {/* ── This grouping's annotation thread ── */}
+                    <div className="mt-3">
+                      <div className="mapsa-section-label mb-1.5">
+                        Annotations on this grouping ({groupAnns.length})
+                      </div>
+                      {groupAnns.length === 0 ? (
+                        <p className="font-garamond text-xs text-mapsa-muted/60 italic mb-2">
+                          No annotations yet.{canContribute ? ' Add the first below.' : ''}
+                        </p>
+                      ) : (
+                        groupAnns.slice(0, 8).map((ann) => (
+                          <div key={ann.id} className="mb-2 border-l-2 border-mapsa-gold/30 pl-3">
+                            <p className="font-mono text-[0.56rem] text-mapsa-gold/70 mb-0.5">
+                              {ann.contributor_name}{ann.contributor_affiliation && ` · ${ann.contributor_affiliation}`}</p>
+                            <p className="font-garamond text-xs text-mapsa-text leading-relaxed">{ann.body}</p>
+                            <p className="font-garamond text-[0.56rem] text-mapsa-muted italic mt-0.5">
+                              {ann.type} · {ann.created_at?.split('T')[0]} · {CONFIDENCE_ICON[ann.confidence]} {ann.confidence}
+                              {ann.status === 'pending' && ' · ⏳ pending'}</p>
+                          </div>
+                        ))
+                      )}
+
+                      {/* Annotate this grouping */}
+                      {canContribute ? (
+                        <div className="border border-mapsa-border rounded-md p-3 bg-mapsa-panel-alt mt-2">
+                          <label className="mapsa-label">Annotate this grouping</label>
+                          <textarea className="mapsa-input min-h-[60px] resize-y" placeholder="Your observation on this grouping..."
+                            value={groupAnnotation} onChange={(e) => setGroupAnnotation(e.target.value)} />
+                          <div className="flex items-center gap-2 mt-2">
+                            <select className="mapsa-input flex-1" value={groupAnnConfidence}
+                              onChange={(e) => setGroupAnnConfidence(e.target.value)}>
+                              {CONFIDENCE_LEVELS.map((c) => <option key={c} value={c}>{CONFIDENCE_ICON[c]} {c}</option>)}
+                            </select>
+                            <button className="mapsa-btn-gold" disabled={groupAnnSubmitting || !groupAnnotation.trim()}
+                              onMouseDown={(e) => { e.preventDefault(); handleSubmitGroupAnnotation(); }}>
+                              {groupAnnSubmitting ? "..." : groupAnnSuccess ? "✓" : "Post"}</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-mapsa-muted italic mt-2">
+                          {isPending
+                            ? "Your account is awaiting approval. Once approved you can annotate and propose groupings."
+                            : "Sign in as an approved researcher to annotate this grouping."}
+                        </p>
+                      )}
+
+                      {/* Expand into a new version */}
+                      {canExpandHere && canContribute && (
+                        <div className="border border-mapsa-gold/40 rounded-md p-3 bg-mapsa-panel-alt mt-3">
+                          <div className="mapsa-section-label mb-1">Expand into a new version</div>
+                          <p className="font-garamond text-[0.7rem] text-mapsa-muted leading-relaxed mb-2">
+                            Your current selection adds {lockedEls.length - g.element_ids.length} element(s) to {g.version_label || g.title}.
+                            Saving creates a new version in this family, attributed to you. The original is unchanged.
+                          </p>
+                          <input className="mapsa-input mb-2" placeholder="Title for the new version"
+                            value={groupTitle} onChange={(e) => setGroupTitle(e.target.value)} />
+                          <textarea className="mapsa-input min-h-[50px] resize-y mb-2" placeholder="Why expand this grouping?"
+                            value={groupInterpretation} onChange={(e) => setGroupInterpretation(e.target.value)} />
+                          <button className="mapsa-btn-gold w-full" disabled={groupSubmitting || !groupTitle.trim()}
+                            onMouseDown={(e) => { e.preventDefault(); handleSubmitGroup(); }}>
+                            {groupSubmitting ? "Saving..." : groupSuccess ? "✓ New version saved" : "Save as new version"}</button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

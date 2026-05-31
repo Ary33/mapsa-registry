@@ -238,3 +238,10 @@ body {
   border-color: #9f7a6a;
   color: #c4a090;
 }
+
+/* ─── Grouping selection banner fade-in ───────────────────────── */
+
+@keyframes mapsaFadeIn {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
